@@ -14,7 +14,7 @@ class Client:
             while True:
                 msg = input()
                 self.protocol.send_message(sock, msg.encode())
-                print(self.protocol.receive_message(sock))
+                print(self.protocol.receive_message(sock).decode())
 
 
 if __name__ == '__main__':
