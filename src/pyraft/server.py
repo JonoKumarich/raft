@@ -1,7 +1,8 @@
 import socket
+import threading
 
 from pyraft.message import MessageProtocol, FixedLengthHeaderProtocol
-from pyraft.consts import *
+from pyraft import consts
 
 
 '''
@@ -21,12 +22,16 @@ class Server:
     def run(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((TCP_IP, TCP_PORT))
+        sock.bind((consts.TCP_IP, consts.TCP_PORT))
 
-        sock.listen(1)
-        client, address = sock.accept() # SHould be in while loop
+        sock.listen()
         while True:
-            # Create handle client function and spawn this in a new thread for each connection
+            client, address = sock.accept() # SHould be in while loop
+            print(f'Connection recieved: Address={address[0]} Port={address[1]}')
+            threading.Thread(target=self.handle_connection, args=(client, ), daemon=True).start()
+
+    def handle_connection(self, client: socket.socket) -> None:
+        while True:
             msg = self.protocol.receive_message(client)
             print(msg)
             self.protocol.send_message(client, msg)
@@ -38,5 +43,6 @@ class Server:
 if __name__ == '__main__':
     server = Server(FixedLengthHeaderProtocol())
     server.run()
+
 
 
