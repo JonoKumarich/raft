@@ -1,4 +1,4 @@
-from typing import Literal, Protocol
+from typing import Protocol
 import socket
 
 from pyraft import consts

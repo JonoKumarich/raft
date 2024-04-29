@@ -1,8 +1,10 @@
 import socket
 import threading
 import queue
+from typing import Type
 
 from pyraft.message import MessageProtocol, FixedLengthHeaderProtocol
+from pyraft.storage import DataStore, DictStore
 from pyraft import consts
 
 
@@ -10,16 +12,17 @@ class Server:
     def __init__(
         self, 
         protocol: MessageProtocol, 
+        datastore: Type[DataStore],
         ip: str = consts.TCP_IP, 
         port: int = consts.TCP_PORT, 
-        buffer_size: int = consts.BUFFER_SIZE
+        buffer_size: int = consts.BUFFER_SIZE,
     ) -> None:
         self.ip = ip
         self.port = port
         self.buffer_size = buffer_size
         self.protocol = protocol
         self.queue = queue.Queue()
-        self.data = {}
+        self.data = datastore.init()
 
     def run(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -64,7 +67,7 @@ class Server:
 
                     return_queue.put(val.encode())
                 case 'del':
-                    del self.data[rest]
+                    self.data.delete(rest)
                     return_queue.put(b'ok')
                 case 'set':
                     try:
@@ -72,7 +75,7 @@ class Server:
                     except ValueError:
                         return_queue.put(b'Invalid message format')
                         continue
-                    self.data[key] = value
+                    self.data.set(key, value)
                     return_queue.put(b'ok')
                 case 'incr':
                     try:
@@ -81,20 +84,18 @@ class Server:
                         return_queue.put(b'Invalid message format')
                         continue
                     
-                    #TODO: Handle non int increments
-
-                    self.data[key] += value
+                    self.data.incr(key, value)
                     return_queue.put(b'ok')
                 case _:
                     return_queue.put(b'invalid command')
 
-    # def hjandle_client
-        # Parse message, find operations (get, set, del, incr), and perform operation on database
-        # THis should just append onto a queue.Queue and then a separate thread called handle_messages will pop off the queue and handle it
-
+ 
 if __name__ == '__main__':
-    server = Server(FixedLengthHeaderProtocol())
-    server.run()
+    server = Server(
+        FixedLengthHeaderProtocol(),
+        DictStore
+    )
 
+    server.run()
 
 
