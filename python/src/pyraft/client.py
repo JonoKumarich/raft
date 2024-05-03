@@ -1,7 +1,8 @@
 import socket
 
-from pyraft.message import MessageProtocol, FixedLengthHeaderProtocol
 from pyraft import consts
+from pyraft.message import FixedLengthHeaderProtocol, MessageProtocol
+
 
 class Client:
     def __init__(self, protocol: MessageProtocol) -> None:
@@ -17,7 +18,6 @@ class Client:
                 print(self.protocol.receive_message(sock).decode())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     client = Client(FixedLengthHeaderProtocol())
     client.run()
-
