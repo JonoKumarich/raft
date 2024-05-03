@@ -12,7 +12,7 @@ class Server:
     def __init__(
         self,
         protocol: MessageProtocol,
-        datastore: Type[DataStore],
+        datastore: DataStore,
         ip: str = consts.TCP_IP,
         port: int = consts.TCP_PORT,
         buffer_size: int = consts.BUFFER_SIZE,
@@ -21,11 +21,10 @@ class Server:
         self.port = port
         self.buffer_size = buffer_size
         self.protocol = protocol
-        self.queue = (
-            queue.Queue()
-        )  # TODO: Set this to two queueus, an oubox queue and an inbox queue. Instead of the nested queues.
-        # Then we can send the address in the message instead of the return queue, the processor looks up the socket for that address and then sends the return message
-        self.data = datastore.init()
+        self.inbox = queue.Queue()
+        self.outbox: dict[str, queue.Queue] = {}
+        self.data = datastore
+        self.connections: dict[str, socket.socket] = {}
 
     def run(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -33,32 +32,43 @@ class Server:
         sock.bind((consts.TCP_IP, consts.TCP_PORT))
 
         threading.Thread(target=self.handle_messages, daemon=True).start()
-
         sock.listen()
+
+        print(f"Server up and running on: {consts.TCP_IP}:{consts.TCP_PORT}")
+
         while True:
-            client, address = sock.accept()  # SHould be in while loop
+            client, address = sock.accept()
+            self.connections[address] = client
+            self.outbox[address] = queue.Queue()
             print(f"Connection recieved: Address={address[0]} Port={address[1]}")
             threading.Thread(
-                target=self.handle_connection, args=(client,), daemon=True
+                target=self.handle_inbox, args=(address,), daemon=True
+            ).start()
+            threading.Thread(
+                target=self.handle_outbox, args=(address,), daemon=True
             ).start()
 
-    def handle_connection(self, client: socket.socket) -> None:
-        return_queue = queue.Queue()
+    def handle_inbox(self, address: str) -> None:
+        client = self.connections[address]
         while True:
             message = self.protocol.receive_message(client)
-            self.queue.put((return_queue, message))
-            response = return_queue.get()
-            self.protocol.send_message(client, response)
+            self.inbox.put((address, message))
+
+    def handle_outbox(self, address: str) -> None:
+        client = self.connections[address]
+        while True:
+            message = self.outbox[address].get()
+            self.protocol.send_message(client, message)
 
     def handle_messages(self) -> None:
         while True:
-            (return_queue, message) = self.queue.get()
+            address, message = self.inbox.get()
             message = message.decode()
 
             try:
                 op, rest = message.split(" ", 1)
             except ValueError:
-                return_queue.put(b"Invalid message format")
+                self.outbox[address].put(b"Invalid message format")
                 continue
 
             match op.lower():
@@ -66,35 +76,34 @@ class Server:
                     val = self.data.get(rest)
 
                     if val is None:
-                        return_queue.put(b"Key does not exist")
+                        self.outbox[address].put(b"Key does not exist")
                         continue
 
-                    return_queue.put(val.encode())
+                    self.outbox[address].put(val.encode())
                 case "del":
                     self.data.delete(rest)
-                    return_queue.put(b"ok")
+                    self.outbox[address].put(b"ok")
                 case "set":
                     try:
                         key, value = rest.split(" ", 1)
                     except ValueError:
-                        return_queue.put(b"Invalid message format")
+                        self.outbox[address].put(b"Invalid message format")
                         continue
                     self.data.set(key, value)
-                    return_queue.put(b"ok")
+                    self.outbox[address].put(b"ok")
                 case "incr":
                     try:
                         key, value = rest.split(" ", 1)
                     except ValueError:
-                        return_queue.put(b"Invalid message format")
+                        self.outbox[address].put(b"Invalid message format")
                         continue
 
                     self.data.incr(key, value)
-                    return_queue.put(b"ok")
+                    self.outbox[address].put(b"ok")
                 case _:
-                    return_queue.put(b"invalid command")
+                    self.outbox[address].put(b"invalid command")
 
 
 if __name__ == "__main__":
-    server = Server(FixedLengthHeaderProtocol(), DictStore)
-
+    server = Server(FixedLengthHeaderProtocol(), DictStore.init())
     server.run()
