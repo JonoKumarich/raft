@@ -1,8 +1,6 @@
 import socket
 from typing import Protocol
 
-from pyraft import consts
-
 
 class MessageProtocol(Protocol):
     def send_message(self, socket: socket.socket, message: bytes) -> None: ...
@@ -37,9 +35,7 @@ class FixedLengthHeaderProtocol(MessageProtocol):
         received_bytes = 0
         while True:
             remaining_bytes = required_bytes - received_bytes
-            received_bytes += socket.recv_into(
-                buffer, min(consts.BUFFER_SIZE, remaining_bytes)
-            )
+            received_bytes += socket.recv_into(buffer, min(1024, remaining_bytes))
 
             if received_bytes >= required_bytes:
                 break

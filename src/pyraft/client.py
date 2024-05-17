@@ -1,16 +1,17 @@
 import socket
 
-from pyraft import consts
 from pyraft.message import FixedLengthHeaderProtocol, MessageProtocol
 
 
 class Client:
-    def __init__(self, protocol: MessageProtocol) -> None:
+    def __init__(self, ip: str, port: int, protocol: MessageProtocol) -> None:
         self.protocol = protocol
+        self.ip = ip
+        self.port = port
 
     def run(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((consts.TCP_IP, consts.TCP_PORT))
+            sock.connect((self.ip, self.port))
 
             while True:
                 msg = input()
@@ -19,5 +20,5 @@ class Client:
 
 
 if __name__ == "__main__":
-    client = Client(FixedLengthHeaderProtocol())
+    client = Client("127.0.0.1", 20000, FixedLengthHeaderProtocol())
     client.run()

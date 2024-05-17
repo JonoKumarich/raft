@@ -1,9 +1,7 @@
 import queue
 import socket
 import threading
-from typing import Type
 
-from pyraft import consts
 from pyraft.message import FixedLengthHeaderProtocol, MessageProtocol
 from pyraft.storage import DataStore, DictStore
 
@@ -11,11 +9,11 @@ from pyraft.storage import DataStore, DictStore
 class Server:
     def __init__(
         self,
-        protocol: MessageProtocol,
-        datastore: DataStore,
-        ip: str = consts.TCP_IP,
-        port: int = consts.TCP_PORT,
-        buffer_size: int = consts.BUFFER_SIZE,
+        ip: str,
+        port: int,
+        protocol: MessageProtocol = FixedLengthHeaderProtocol(),
+        datastore: DataStore = DictStore(),
+        buffer_size: int = 1024,
     ) -> None:
         self.ip = ip
         self.port = port
@@ -29,12 +27,12 @@ class Server:
     def run(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((consts.TCP_IP, consts.TCP_PORT))
+        sock.bind((self.ip, self.port))
 
         threading.Thread(target=self.handle_messages, daemon=True).start()
         sock.listen()
 
-        print(f"Server up and running on: {consts.TCP_IP}:{consts.TCP_PORT}")
+        print(f"Server up and running on: {self.ip}:{self.port}")
 
         while True:
             client, address = sock.accept()
@@ -102,8 +100,3 @@ class Server:
                     self.outbox[address].put(b"ok")
                 case _:
                     self.outbox[address].put(b"invalid command")
-
-
-if __name__ == "__main__":
-    server = Server(FixedLengthHeaderProtocol(), DictStore.init())
-    server.run()
