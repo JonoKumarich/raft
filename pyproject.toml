@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Custom implementation of the raft algorithm"
 
 dependencies = [
-    "typer==0.12.3"
+    "pydantic"
 ]
 
 [project.scripts]

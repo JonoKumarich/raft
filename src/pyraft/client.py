@@ -1,6 +1,6 @@
 import socket
 
-from pyraft.message import FixedLengthHeaderProtocol, MessageProtocol
+from pyraft.protocol import FixedLengthHeaderProtocol, MessageProtocol
 
 
 class Client:
