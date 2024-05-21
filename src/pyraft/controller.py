@@ -19,10 +19,10 @@ from pyraft.state import MachineState, RaftMachine
 
 class ActionKind(Enum):
     APPEND_ENTRIES = auto()
+    APPEND_ENTRIES_RESPONSE = auto()
     REQUEST_VOTE = auto()
     REQUEST_VOTE_RESPONSE = auto()
     TICK = auto()
-    APPEND_ENTRIES_RESPONSE = auto()
 
 
 @dataclass
@@ -142,7 +142,7 @@ class Controller:
                 term=self.machine.current_term, success=True
             )
 
-            if self.machine.state != MachineState.FOLLOWER:
+            if self.machine.is_candidate:
                 self.machine.demote()
 
         # TODO:
@@ -176,6 +176,7 @@ class Controller:
                 term=self.machine.current_term, vote_granted=False
             )
         elif (no_votes or already_voted_for) and (term_is_greater or index_is_greater):
+            self.machine.update_term(request_vote.term)
             response = RequestVoteResponse(
                 term=self.machine.current_term, vote_granted=True
             )
@@ -194,15 +195,20 @@ class Controller:
         self, request_vote_response: RequestVoteResponse
     ) -> None:
 
+        # Skip remaining votes responses after obtaining a majority
+        if self.machine.is_leader:
+            return
+
         if request_vote_response.vote_granted:
             self.machine.add_vote()
+
+        if self.machine.is_leader:
+            self.send_heartbeat()
 
     def handle_tick(self) -> None:
         self.machine.increment_clock()
 
-        is_election_start = (
-            self.machine.clock == 0 and self.machine.state == MachineState.CANDIDATE
-        )
+        is_election_start = self.machine.clock == 0 and self.machine.is_candidate
         if is_election_start:
             print("Triggering election")
 
@@ -219,20 +225,22 @@ class Controller:
             return
 
         is_heartbeat = self.machine.clock % self.heartbeat_frequency == 0
-        if is_heartbeat and self.machine.state == MachineState.LEADER:
-            data = AppendEntries(
-                term=self.machine.current_term,
-                leader_id=self.machine.server_id,
-                prev_log_term=self.log.last_term,
-                prev_log_index=self.log.last_index,
-                entries=[],
-                leader_commit=self.log.latest_commit,
-            )
+        if is_heartbeat and self.machine.is_leader:
+            self.send_heartbeat()
 
-            self.server.send_to_all_nodes(
-                b"append_entries " + data.model_dump_json().encode()
-            )
-            return
+    def send_heartbeat(self) -> None:
+        data = AppendEntries(
+            term=self.machine.current_term,
+            leader_id=self.machine.server_id,
+            prev_log_term=self.log.last_term,
+            prev_log_index=self.log.last_index,
+            entries=[],
+            leader_commit=self.log.latest_commit,
+        )
+
+        self.server.send_to_all_nodes(
+            b"append_entries " + data.model_dump_json().encode()
+        )
 
 
 if __name__ == "__main__":

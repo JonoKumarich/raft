@@ -25,6 +25,10 @@ class RaftMachine:
         self.last_applied = 0
         self.num_votes_recieved = 0
 
+        # Leader Volatile state
+        self.next_index: dict[int, int] = {}
+        self.match_index: dict[int, int] = {}
+
     def __repr__(self) -> str:
         return f"Server={self.server_id} {self.state} Clock={self.clock}"
 
@@ -62,6 +66,18 @@ class RaftMachine:
     def has_majority(self) -> bool:
         return self.num_votes_recieved > (self.num_servers / 2)
 
+    @property
+    def is_leader(self) -> bool:
+        return self.state == MachineState.LEADER
+
+    @property
+    def is_follower(self) -> bool:
+        return self.state == MachineState.FOLLOWER
+
+    @property
+    def is_candidate(self) -> bool:
+        return self.state == MachineState.CANDIDATE
+
     def add_vote(self) -> None:
         # TODO: Need to make sure we don't duplicate votes
         self.num_votes_recieved += 1
@@ -77,8 +93,14 @@ class RaftMachine:
 
     def update_term(self, term: int) -> None:
         assert term >= self.current_term, "Can't lower the value of a term"
+        if self.current_term == term:
+            return
+
         self.current_term = term
         self.voted_for = None
+
+        if self.is_leader:
+            self.demote()
 
     def demote(self) -> None:
         assert self.state != MachineState.FOLLOWER, "Can't demote a follower"

@@ -9,14 +9,13 @@ SERVER_NODES = {
     0: ("127.0.0.1", 20000),
     1: ("127.0.0.1", 20001),
     2: ("127.0.0.1", 20002),
-    # 3: ("127.0.0.1", 20003),
-    # 4: ("127.0.0.1", 20004),
+    3: ("127.0.0.1", 20003),
+    4: ("127.0.0.1", 20004),
 }
 
-# TODO:
-# On s+number, start / stop that server DONE
-# On t+number, timeout that server
-# On m+number, create a client and send a message to that server
+
+# TODO: figure out difference between state machine log and local log
+# I think the local log is contained by the controller and the state machine log contains the commited entries?
 
 
 class Network:
@@ -60,10 +59,11 @@ class Network:
                     status = self.controllers[server_num].toggle_active_status()
                     print(f"Server {server_num} status {not status}->{status}")
                 case "t":
-                    controller = self.controllers[server_num].timeout()
+                    self.controllers[server_num].timeout()
                     print(f"Timed out server {server_num}")
                 case "m":
-                    pass
+                    # TODO: On m+number, create a client and send a message to that server
+                    print("m command not yet implemented")
                 case _:
                     print(f"Command not recognised: {command}")
 

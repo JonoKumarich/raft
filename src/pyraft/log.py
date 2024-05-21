@@ -13,6 +13,9 @@ class Log:
     def __init__(self) -> None:
         self.items: list[LogEntry] = []
 
+    def get(self, index: int) -> LogEntry:
+        return self.items[index]
+
     @property
     def last_term(self) -> int:
         if self.last_index == 0:
