@@ -136,7 +136,6 @@ class Controller:
         pass
 
     def handle_request_vote(self, request_vote: RequestVote) -> None:
-        # FIXME: Somehow two servers are able to become leaders when they have the same first timeout length initialized
 
         term_is_greater = request_vote.last_log_term > self.log.last_term
         index_is_greater = (
@@ -154,6 +153,7 @@ class Controller:
             response = RequestVoteResponse(
                 term=self.machine.current_term, vote_granted=True
             )
+            self.machine.voted_for = request_vote.candidate_id
         else:
             response = RequestVoteResponse(
                 term=self.machine.current_term, vote_granted=False
