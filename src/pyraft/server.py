@@ -27,6 +27,7 @@ class Server:
         self.connections: dict[Address, socket.socket] = {}
         self.server_mappings = server_mappings
         self.server_id = server_id
+        self.active = True
 
         # We don't want to include itself - maybe a better way to handle this
         del self.server_mappings[server_id]
@@ -65,6 +66,10 @@ class Server:
 
         while True:
             message = self.outbox[address].get()
+
+            if not self.active:
+                continue
+
             try:
                 client = self.connections[address]
                 if is_socket_closed(client):

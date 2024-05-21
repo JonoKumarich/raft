@@ -13,6 +13,11 @@ SERVER_NODES = {
     # 4: ("127.0.0.1", 20004),
 }
 
+# TODO:
+# On s+number, start / stop that server
+# On t+number, timeout that server
+# On m+number, create a client and send a message to that server
+
 
 class Network:
     def __init__(self, server_nodes: dict[int, tuple[str, int]]) -> None:
@@ -23,18 +28,43 @@ class Network:
             )
             for id, (host, port) in server_nodes.items()
         }
+        self.controllers: dict[int, Controller] = {}
 
     def start_servers(self) -> None:
+        threading.Thread(target=self.key_listener, daemon=True).start()
+
         with ThreadPoolExecutor() as executor:
             executor.map(self.start_sever, self.initialized_servers.values())
 
-    def start_sever(self, server: Server):
+    def start_sever(self, server: Server) -> None:
         threading.Thread(target=server.run, daemon=True).start()
 
         controller = Controller(
             server, RaftMachine(server.server_id, self.network_size)
         )
+        self.controllers[server.server_id] = controller
         controller.run()
+
+    def key_listener(self) -> None:
+        while True:
+            keys = input()
+
+            if len(keys) != 2:
+                print("Command must be of length 2")
+                continue
+
+            command, server_num = keys[0], int(keys[1])
+
+            match command:
+                case "s":
+                    status = self.controllers[server_num].toggle_active_status()
+                    print(f"Server {server_num} status {not status}->{status}")
+                case "t":
+                    pass
+                case "m":
+                    pass
+                case _:
+                    print(f"Command not recognised: {command}")
 
 
 if __name__ == "__main__":

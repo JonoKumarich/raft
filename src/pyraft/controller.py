@@ -39,6 +39,7 @@ class Controller:
         self.queue: queue.Queue[Action] = queue.Queue()
         self.time_dilation = 1.0
         self.heartbeat_frequency = 2
+        self.active = True
 
     def run(self) -> None:
         threading.Thread(target=self.clock, daemon=True).start()
@@ -48,9 +49,17 @@ class Controller:
         while True:
             continue
 
+    def toggle_active_status(self) -> bool:
+        self.active = not self.active
+        return self.active
+
     def handle_messages(self):
         while True:
             address, message = self.server.inbox.get()
+
+            if not self.active:
+                continue
+
             print(f"received message {message.decode()}")
 
             command, data = message.split(maxsplit=1)
@@ -93,6 +102,9 @@ class Controller:
     def handle_queue(self) -> None:
         while True:
             action = self.queue.get()
+
+            if not self.active:
+                continue
 
             match action.kind:
                 case ActionKind.APPEND_ENTRIES:
