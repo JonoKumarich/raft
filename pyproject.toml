@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyraft"
 version = "0.1.0"
-description = "Custom implementation of the raft algorithm"
+description = "Custom implementation of the Raft distributed consensus algorithm"
 
 dependencies = [
     "pydantic"
 ]
 
-[project.scripts]
-pyraft = "pyraft.cli:main"
+# [project.scripts]
+# pyraft = "pyraft.cli:main"
 
 [options.packages.find]
 where = "src"

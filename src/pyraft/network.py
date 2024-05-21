@@ -8,7 +8,7 @@ from pyraft.state import RaftMachine
 SERVER_NODES = {
     0: ("127.0.0.1", 20000),
     1: ("127.0.0.1", 20001),
-    # 2: ("127.0.0.1", 20002),
+    2: ("127.0.0.1", 20002),
     # 3: ("127.0.0.1", 20003),
     # 4: ("127.0.0.1", 20004),
 }
@@ -28,10 +28,12 @@ class Network:
         with ThreadPoolExecutor() as executor:
             executor.map(self.start_sever, self.initialized_servers.values())
 
-    @staticmethod
-    def start_sever(server: Server):
+    def start_sever(self, server: Server):
         threading.Thread(target=server.run, daemon=True).start()
-        controller = Controller(server, RaftMachine())
+
+        controller = Controller(
+            server, RaftMachine(server.server_id, self.network_size)
+        )
         controller.run()
 
 

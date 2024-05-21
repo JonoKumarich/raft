@@ -28,6 +28,7 @@ class Server:
         self.server_mappings = server_mappings
         self.server_id = server_id
 
+        # We don't want to include itself - maybe a better way to handle this
         del self.server_mappings[server_id]
 
     def run(self) -> None:
@@ -61,7 +62,6 @@ class Server:
     def handle_outbox(self, address: Address) -> None:
         if address not in self.outbox.keys():
             self.outbox[address] = queue.Queue()
-            print(f"New outbox created for {address}")
 
         while True:
             message = self.outbox[address].get()
@@ -86,6 +86,16 @@ class Server:
                 ).start()
 
             self.outbox[address].put(message)
+
+    def send_to_single_node(self, server_id: int, message: bytes) -> None:
+        address = self.server_mappings[server_id]
+
+        if address not in self.outbox.values():
+            threading.Thread(
+                target=self.handle_outbox, args=(address,), daemon=True
+            ).start()
+
+        self.outbox[address].put(message)
 
 
 def open_socket(address: Address) -> socket.socket:

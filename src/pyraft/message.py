@@ -12,8 +12,18 @@ class AppendEntries(BaseModel):
     leader_commit: int
 
 
+class AppendEntriesResponse(BaseModel):
+    term: int
+    success: bool
+
+
 class RequestVote(BaseModel):
     term: int
     candidate_id: int
     last_log_index: int
     last_log_term: int
+
+
+class RequestVoteResponse(BaseModel):
+    term: int
+    vote_granted: bool
