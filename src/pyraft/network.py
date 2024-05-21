@@ -14,7 +14,7 @@ SERVER_NODES = {
 }
 
 # TODO:
-# On s+number, start / stop that server
+# On s+number, start / stop that server DONE
 # On t+number, timeout that server
 # On m+number, create a client and send a message to that server
 
@@ -60,7 +60,8 @@ class Network:
                     status = self.controllers[server_num].toggle_active_status()
                     print(f"Server {server_num} status {not status}->{status}")
                 case "t":
-                    pass
+                    controller = self.controllers[server_num].timeout()
+                    print(f"Timed out server {server_num}")
                 case "m":
                     pass
                 case _:

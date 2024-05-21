@@ -53,6 +53,17 @@ class Controller:
         self.active = not self.active
         return self.active
 
+    def timeout(self) -> None:
+        match self.machine.state:
+            case MachineState.FOLLOWER:
+                self.machine.clock = self.machine.election_timeout - 1
+                self.queue.put(Action(ActionKind.TICK, None))
+            case MachineState.CANDIDATE | MachineState.LEADER:
+                # TODO: implement this for leader and candidate
+                print("Error: Timing out a leader or candidate not currently supported")
+            case _:
+                print("Unexpected error")
+
     def handle_messages(self):
         while True:
             address, message = self.server.inbox.get()
