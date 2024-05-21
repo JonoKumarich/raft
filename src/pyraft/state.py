@@ -16,7 +16,7 @@ class RaftMachine:
         self.server_id = server_id
         self.num_servers = num_servers
         self.current_term = 1
-        self.voted_for = None
+        self.voted_for: Optional[int] = None
         self.clock = 0
         # TODO: Should this be reinitialized every timeout?
         self.election_timeout = random.randint(5, 10) if timeout is None else timeout
@@ -78,3 +78,10 @@ class RaftMachine:
     def update_term(self, term: int) -> None:
         assert term >= self.current_term, "Can't lower the value of a term"
         self.current_term = term
+        self.voted_for = None
+
+    def demote(self) -> None:
+        assert self.state != MachineState.FOLLOWER, "Can't demote a follower"
+
+        self.state = MachineState.FOLLOWER
+        self.reset_clock()

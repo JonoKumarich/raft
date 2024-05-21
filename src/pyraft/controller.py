@@ -119,6 +119,9 @@ class Controller:
                 term=self.machine.current_term, success=True
             )
 
+            if self.machine.state != MachineState.FOLLOWER:
+                self.machine.demote()
+
         # TODO:
         # 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
         # 3. If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
