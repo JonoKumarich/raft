@@ -33,31 +33,34 @@ class RaftMachine:
             self.clock < self.election_timeout
         ), "Error, Clock is already past the election timeout"
 
-        self.clock += 1
         print(self)
+
+        if self.state == MachineState.LEADER:
+            return
+
+        self.clock += 1
 
         if self.clock >= self.election_timeout:
             self.attempt_candidacy()
 
     def attempt_candidacy(self) -> None:
         assert self.state != MachineState.LEADER, "Leader cannot become a candidate"
-        # ISSUE: servers are attempting candidacy twice
 
-        print(f"{self.server_id} ATTEMPTYIUNg candidacy")
         self.current_term += 1
         self.voted_for = self.server_id
         self.state = MachineState.CANDIDATE
-        self.clock = 0
+        self.reset_clock()
 
-        # TODO: Instead of voting for itself, it just starts with a single vote. Need to check that this is okay
+        # TODO: Instead of voting for itself through a socket, it just sets 1 vote already. Need to check that this is okay
         self.num_votes_recieved = 1
 
     def convert_to_leader(self) -> None:
-        raise NotImplementedError
+        self.state = MachineState.LEADER
+        self.reset_clock()
 
     @property
     def has_majority(self) -> bool:
-        return self.num_votes_recieved < self.num_servers / 2
+        return self.num_votes_recieved > (self.num_servers / 2)
 
     def add_vote(self) -> None:
         # TODO: Need to make sure we don't duplicate votes
@@ -71,3 +74,7 @@ class RaftMachine:
     def reset_clock(self) -> None:
         self.clock = 0
         # TODO: Reset the election timeout to another random initialization
+
+    def update_term(self, term: int) -> None:
+        assert term >= self.current_term, "Can't lower the value of a term"
+        self.current_term = term

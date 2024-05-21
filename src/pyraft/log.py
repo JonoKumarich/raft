@@ -6,6 +6,7 @@ from typing import Any
 class LogEntry:
     value: Any
     term: int
+    commited: bool
 
 
 class Log:
@@ -22,3 +23,7 @@ class Log:
     @property
     def last_index(self) -> int:
         return len(self.items)
+
+    @property
+    def latest_commit(self) -> int:
+        return len([item for item in self.items if item.commited])
