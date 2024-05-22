@@ -25,5 +25,6 @@ class RequestVote(BaseModel):
 
 
 class RequestVoteResponse(BaseModel):
+    server_id: int
     term: int
     vote_granted: bool

@@ -131,29 +131,44 @@ class Controller:
                 case _:
                     raise ValueError("action not detected")
 
-    def handle_append_entries(self, append_entry: AppendEntries) -> None:
+    def _append_entry_success(self, append_entry: AppendEntries) -> bool:
         if append_entry.term < self.machine.current_term:
-            response = AppendEntriesResponse(
-                term=self.machine.current_term, success=False
-            )
-        else:
-            self.machine.update_term(append_entry.term)
-            response = AppendEntriesResponse(
-                term=self.machine.current_term, success=True
-            )
+            return False
 
-            if self.machine.is_candidate:
-                self.machine.demote()
+        no_logs = append_entry.prev_log_index == 0 and self.log.last_index == 0
+        if no_logs:
+            return True
 
-        # TODO:
-        # 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-        # 3. If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
-        # 4. Append any new entries not already in the log
-        # 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+        last_log = self.log.get(append_entry.prev_log_index)
+        if last_log is None:
+            return False
+
+        if last_log.term != append_entry.term:
+            return False
+
+        return True
+
+    def handle_append_entries(self, append_entry: AppendEntries) -> None:
+        # TODO: Steps 3-5 of reciever implementation
+
+        if self.machine.is_candidate and self.machine.current_term <= append_entry.term:
+            self.machine.demote_to_follower()
+
+        success = self._append_entry_success(append_entry)
+
+        response = AppendEntriesResponse(
+            term=self.machine.current_term,
+            success=success,
+        )
 
         message = b"append_entries_response " + response.model_dump_json().encode()
         self.server.send_to_single_node(append_entry.leader_id, message)
+
+        if not success:
+            return
+
         self.machine.reset_clock()
+        self.machine.update_commits()
 
     def handle_append_entries_response(
         self, append_entry_response: AppendEntriesResponse
@@ -161,8 +176,7 @@ class Controller:
         # TODO: Empty implementation for now
         pass
 
-    def handle_request_vote(self, request_vote: RequestVote) -> None:
-
+    def _request_vote_success(self, request_vote: RequestVote) -> bool:
         term_is_greater = request_vote.last_log_term > self.log.last_term
         index_is_greater = (
             request_vote.last_log_term == self.log.last_term
@@ -172,24 +186,31 @@ class Controller:
         no_votes = self.machine.voted_for is None
 
         if request_vote.term < self.machine.current_term:
-            response = RequestVoteResponse(
-                term=self.machine.current_term, vote_granted=False
-            )
-        elif (no_votes or already_voted_for) and (term_is_greater or index_is_greater):
-            self.machine.update_term(request_vote.term)
-            response = RequestVoteResponse(
-                term=self.machine.current_term, vote_granted=True
-            )
+            return False
+
+        if (no_votes or already_voted_for) and (term_is_greater or index_is_greater):
+            return True
+
+        return False
+
+    def handle_request_vote(self, request_vote: RequestVote) -> None:
+
+        success = self._request_vote_success(request_vote)
+
+        if success:
             self.machine.voted_for = request_vote.candidate_id
-        else:
-            response = RequestVoteResponse(
-                term=self.machine.current_term, vote_granted=False
-            )
+
+        response = RequestVoteResponse(
+            server_id=self.server.server_id,
+            term=self.machine.current_term,
+            vote_granted=success,
+        )
 
         message = b"request_vote_response " + response.model_dump_json().encode()
         self.server.send_to_single_node(request_vote.candidate_id, message)
 
         self.machine.reset_clock()
+        # NOTE: Matthijs said that the clock doesn't need to reset here in excalidraw, but it looks like it does in the simulation
 
     def handle_request_vote_reponse(
         self, request_vote_response: RequestVoteResponse
@@ -200,7 +221,7 @@ class Controller:
             return
 
         if request_vote_response.vote_granted:
-            self.machine.add_vote()
+            self.machine.add_vote(request_vote_response.server_id)
 
         if self.machine.is_leader:
             self.send_heartbeat()
@@ -227,6 +248,11 @@ class Controller:
         is_heartbeat = self.machine.clock % self.heartbeat_frequency == 0
         if is_heartbeat and self.machine.is_leader:
             self.send_heartbeat()
+
+        # TODO:
+        # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
+        #     • If successful: update nextIndex and matchIndex for follower (§5.3)
+        #     • If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
 
     def send_heartbeat(self) -> None:
         data = AppendEntries(

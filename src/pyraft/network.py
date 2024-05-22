@@ -14,10 +14,6 @@ SERVER_NODES = {
 }
 
 
-# TODO: figure out difference between state machine log and local log
-# I think the local log is contained by the controller and the state machine log contains the commited entries?
-
-
 class Network:
     def __init__(self, server_nodes: dict[int, tuple[str, int]]) -> None:
         self.network_size = len(server_nodes)

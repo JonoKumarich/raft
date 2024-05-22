@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -13,8 +13,13 @@ class Log:
     def __init__(self) -> None:
         self.items: list[LogEntry] = []
 
-    def get(self, index: int) -> LogEntry:
-        return self.items[index]
+    def get(self, index: int) -> Optional[LogEntry]:
+        assert index >= 0, "Index must be greater than zero"
+
+        try:
+            return self.items[index - 1]
+        except IndexError:
+            return None
 
     @property
     def last_term(self) -> int:
