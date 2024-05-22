@@ -4,7 +4,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Optional
 
 from pyraft.log import Log
 from pyraft.message import (
@@ -13,7 +13,7 @@ from pyraft.message import (
     RequestVote,
     RequestVoteResponse,
 )
-from pyraft.server import Server
+from pyraft.server import Server, SocketServer
 from pyraft.state import MachineState, RaftMachine
 
 
@@ -64,72 +64,75 @@ class Controller:
             case _:
                 print("Unexpected error")
 
+    @staticmethod
+    def _handle_message(message: bytes) -> Optional[Action]:
+        command, data = message.split(maxsplit=1)
+        command = command.decode()
+
+        try:
+            data = json.loads(data)
+        except SyntaxError:
+            print("Recieved value can't be deserliazlised")
+            return
+
+        match command:
+            case "append_entries":
+                append_entry = AppendEntries.model_validate(data)
+                return Action(ActionKind.APPEND_ENTRIES, append_entry)
+            case "append_entries_response":
+                append_entry_response = AppendEntriesResponse.model_validate(data)
+                return Action(ActionKind.APPEND_ENTRIES_RESPONSE, append_entry_response)
+            case "request_vote":
+                request_vote = RequestVote.model_validate(data)
+                return Action(ActionKind.REQUEST_VOTE, request_vote)
+            case "request_vote_response":
+                request_vote_response = RequestVoteResponse.model_validate(data)
+                return Action(ActionKind.REQUEST_VOTE_RESPONSE, request_vote_response)
+            case _:
+                print(f"Command {command} not recognised")
+                return
+
     def handle_messages(self):
         while True:
-            address, message = self.server.inbox.get()
+            message = self.server.inbox.get()
 
             if not self.active:
                 continue
 
-            print(f"received message {message.decode()}")
+            action = self._handle_message(message)
 
-            command, data = message.split(maxsplit=1)
-            command = command.decode()
-
-            try:
-                data = json.loads(data)
-            except SyntaxError:
-                print("Recieved value can't be deserliazlised")
+            if action is None:
                 continue
 
-            match command:
-                case "append_entries":
-                    append_entry = AppendEntries.model_validate(data)
-                    self.queue.put(Action(ActionKind.APPEND_ENTRIES, append_entry))
-                case "append_entries_response":
-                    append_entry_response = AppendEntriesResponse.model_validate(data)
-                    self.queue.put(
-                        Action(
-                            ActionKind.APPEND_ENTRIES_RESPONSE, append_entry_response
-                        )
-                    )
-                case "request_vote":
-                    request_vote = RequestVote.model_validate(data)
-                    self.queue.put(Action(ActionKind.REQUEST_VOTE, request_vote))
-                case "request_vote_response":
-                    request_vote_response = RequestVoteResponse.model_validate(data)
-                    self.queue.put(
-                        Action(ActionKind.REQUEST_VOTE_RESPONSE, request_vote_response)
-                    )
-                case _:
-                    print(f"Command {command} not recognised")
-                    continue
+            self.queue.put(action)
 
     def clock(self) -> None:
         while True:
             time.sleep(1 * self.time_dilation)
             self.queue.put(Action(ActionKind.TICK, None))
 
+    def _handle_item(self, action: Action) -> None:
+        if not self.active:
+            return
+
+        match action.kind:
+            case ActionKind.APPEND_ENTRIES:
+                self.handle_append_entries(action.data)
+            case ActionKind.APPEND_ENTRIES_RESPONSE:
+                self.handle_append_entries_response(action.data)
+            case ActionKind.REQUEST_VOTE:
+                self.handle_request_vote(action.data)
+            case ActionKind.REQUEST_VOTE_RESPONSE:
+                self.handle_request_vote_reponse(action.data)
+            case ActionKind.TICK:
+                self.handle_tick()
+            case _:
+                raise ValueError("action not detected")
+
     def handle_queue(self) -> None:
         while True:
             action = self.queue.get()
-
-            if not self.active:
-                continue
-
-            match action.kind:
-                case ActionKind.APPEND_ENTRIES:
-                    self.handle_append_entries(action.data)
-                case ActionKind.APPEND_ENTRIES_RESPONSE:
-                    self.handle_append_entries_response(action.data)
-                case ActionKind.REQUEST_VOTE:
-                    self.handle_request_vote(action.data)
-                case ActionKind.REQUEST_VOTE_RESPONSE:
-                    self.handle_request_vote_reponse(action.data)
-                case ActionKind.TICK:
-                    self.handle_tick()
-                case _:
-                    raise ValueError("action not detected")
+            self._handle_item(action)
 
     def _append_entry_success(self, append_entry: AppendEntries) -> bool:
         if append_entry.term < self.machine.current_term:
@@ -154,7 +157,13 @@ class Controller:
         if self.machine.is_candidate and self.machine.current_term <= append_entry.term:
             self.machine.demote_to_follower()
 
+        if self.machine.is_leader and self.machine.current_term < append_entry.term:
+            self.machine.demote_to_follower()
+
         success = self._append_entry_success(append_entry)
+
+        if success:
+            self.machine.update_term(append_entry.term)
 
         response = AppendEntriesResponse(
             term=self.machine.current_term,
@@ -272,6 +281,6 @@ class Controller:
 if __name__ == "__main__":
     host, port = ("127.0.0.1", 20000)
     controller = Controller(
-        server=Server(host, port, {0: (host, port)}, 0), machine=RaftMachine(1, 1)
+        server=SocketServer(host, port, {0: (host, port)}, 0), machine=RaftMachine(1, 1)
     )
     controller.run()

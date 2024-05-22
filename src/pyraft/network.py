@@ -2,7 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from pyraft.controller import Controller
-from pyraft.server import Server
+from pyraft.server import SocketServer
 from pyraft.state import RaftMachine
 
 SERVER_NODES = {
@@ -18,7 +18,7 @@ class Network:
     def __init__(self, server_nodes: dict[int, tuple[str, int]]) -> None:
         self.network_size = len(server_nodes)
         self.initialized_servers = {
-            id: Server(
+            id: SocketServer(
                 ip=host, port=port, server_mappings=server_nodes.copy(), server_id=id
             )
             for id, (host, port) in server_nodes.items()
@@ -31,7 +31,7 @@ class Network:
         with ThreadPoolExecutor() as executor:
             executor.map(self.start_sever, self.initialized_servers.values())
 
-    def start_sever(self, server: Server) -> None:
+    def start_sever(self, server: SocketServer) -> None:
         threading.Thread(target=server.run, daemon=True).start()
 
         controller = Controller(

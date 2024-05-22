@@ -1,14 +1,23 @@
 import queue
 import socket
 import threading
-import time
+from typing import Protocol, Self
 
 from pyraft.protocol import FixedLengthHeaderProtocol, MessageProtocol
 
 Address = tuple[str, int]
 
 
-class Server:
+class Server(Protocol):
+    server_id: int
+    inbox: queue.Queue[bytes]
+
+    def send_to_all_nodes(self, message: bytes) -> None: ...
+
+    def send_to_single_node(self, server_id: int, message: bytes) -> None: ...
+
+
+class SocketServer:
     def __init__(
         self,
         ip: str,
@@ -22,7 +31,7 @@ class Server:
         self.port = port
         self.buffer_size = buffer_size
         self.protocol = protocol
-        self.inbox: queue.Queue[tuple[Address, bytes]] = queue.Queue()
+        self.inbox: queue.Queue[bytes] = queue.Queue()
         self.outbox: dict[Address, queue.Queue] = {}
         self.connections: dict[Address, socket.socket] = {}
         self.server_mappings = server_mappings
@@ -58,7 +67,7 @@ class Server:
         client = self.connections[address]
         while True:
             message = self.protocol.receive_message(client)
-            self.inbox.put((address, message))
+            self.inbox.put(message)
 
     def handle_outbox(self, address: Address) -> None:
         if address not in self.outbox.keys():
@@ -124,3 +133,38 @@ def is_socket_closed(sock: socket.socket) -> bool:
         print(f"{e}: unexpected exception when checking if a socket is closed")
         return False
     return False
+
+
+class MockServer:
+    def __init__(self, server_id: int) -> None:
+        self.server_id = server_id
+        self.inbox: queue.Queue[bytes] = queue.Queue()
+        self.other_servers: dict[int, Self] = {}
+
+    def add_server(self, server: Self) -> None:
+        self.other_servers[server.server_id] = server
+
+    def recieve_message(self, message: bytes) -> None:
+        self.inbox.put(message)
+
+    def send_to_all_nodes(self, message: bytes) -> None:
+        for server in self.other_servers.values():
+            server.recieve_message(message)
+
+    def send_to_single_node(self, server_id: int, message: bytes) -> None:
+        self.other_servers[server_id].recieve_message(message)
+
+
+if __name__ == "__main__":
+    s1 = MockServer(0)
+    s2 = MockServer(2)
+    s3 = MockServer(3)
+
+    s1.add_server(s2)
+    s1.add_server(s3)
+    s2.add_server(s1)
+    s2.add_server(s3)
+    s3.add_server(s1)
+    s3.add_server(s2)
+
+    s1.send_to_all_nodes(b"message")
