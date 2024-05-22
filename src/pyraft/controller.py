@@ -32,7 +32,9 @@ class Action:
 
 
 class Controller:
-    def __init__(self, server: Server, machine: RaftMachine) -> None:
+    def __init__(
+        self, server: Server, machine: RaftMachine, networked: bool = True
+    ) -> None:
         self.server = server
         self.machine = machine
         self.log = Log()  # TODO: Should this be in the controller or the state machine?
@@ -40,6 +42,10 @@ class Controller:
         self.time_dilation = 1.0
         self.heartbeat_frequency = 2
         self.active = True
+
+        # This handles the actions via a queue instead of instantly to avoid race conditions
+        # Can be turned off to help with testing
+        self.networked = networked
 
     def run(self) -> None:
         threading.Thread(target=self.clock, daemon=True).start()
@@ -65,7 +71,7 @@ class Controller:
                 print("Unexpected error")
 
     @staticmethod
-    def _handle_message(message: bytes) -> Optional[Action]:
+    def _process_message(message: bytes) -> Action:
         command, data = message.split(maxsplit=1)
         command = command.decode()
 
@@ -73,7 +79,7 @@ class Controller:
             data = json.loads(data)
         except SyntaxError:
             print("Recieved value can't be deserliazlised")
-            return
+            raise ValueError
 
         match command:
             case "append_entries":
@@ -90,26 +96,38 @@ class Controller:
                 return Action(ActionKind.REQUEST_VOTE_RESPONSE, request_vote_response)
             case _:
                 print(f"Command {command} not recognised")
-                return
+                raise ValueError
+
+    def handle_single_message(self) -> Action:
+        message = self.server.inbox.get()
+
+        action = self._process_message(message)
+
+        if not self.active:
+            return action
+
+        if self.networked:
+            self.queue.put(action)
+        else:
+            self._handle_item(action)
+
+        return action
 
     def handle_messages(self):
         while True:
-            message = self.server.inbox.get()
-
-            if not self.active:
-                continue
-
-            action = self._handle_message(message)
-
-            if action is None:
-                continue
-
-            self.queue.put(action)
+            self.handle_single_message()
 
     def clock(self) -> None:
         while True:
             time.sleep(1 * self.time_dilation)
-            self.queue.put(Action(ActionKind.TICK, None))
+            self.tick()
+
+    def tick(self) -> None:
+        action = Action(ActionKind.TICK, None)
+        if self.networked:
+            self.queue.put(action)
+        else:
+            self._handle_item(action)
 
     def _handle_item(self, action: Action) -> None:
         if not self.active:
@@ -204,10 +222,15 @@ class Controller:
 
     def handle_request_vote(self, request_vote: RequestVote) -> None:
 
+        if request_vote.term > self.machine.current_term:
+            self.machine.update_term(request_vote.term)
+
         success = self._request_vote_success(request_vote)
 
         if success:
             self.machine.voted_for = request_vote.candidate_id
+            self.machine.reset_clock()
+            # NOTE: said that the clock doesn't need to reset here in excalidraw, but it looks like it does in the simulation
 
         response = RequestVoteResponse(
             server_id=self.server.server_id,
@@ -217,9 +240,6 @@ class Controller:
 
         message = b"request_vote_response " + response.model_dump_json().encode()
         self.server.send_to_single_node(request_vote.candidate_id, message)
-
-        self.machine.reset_clock()
-        # NOTE: Matthijs said that the clock doesn't need to reset here in excalidraw, but it looks like it does in the simulation
 
     def handle_request_vote_reponse(
         self, request_vote_response: RequestVoteResponse
@@ -240,7 +260,7 @@ class Controller:
 
         is_election_start = self.machine.clock == 0 and self.machine.is_candidate
         if is_election_start:
-            print("Triggering election")
+            print("starting election")
 
             data = RequestVote(
                 term=self.machine.current_term,

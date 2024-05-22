@@ -9,6 +9,10 @@ class MachineState(Enum):
     FOLLOWER = auto()
 
 
+def create_timeout() -> int:
+    return random.randint(3, 10)
+
+
 class RaftMachine:
     def __init__(
         self, server_id: int, num_servers: int, timeout: Optional[int] = None
@@ -19,7 +23,7 @@ class RaftMachine:
         self.voted_for: Optional[int] = None
         self.clock = 0
         # TODO: Should this be reinitialized every timeout?
-        self.election_timeout = random.randint(5, 10) if timeout is None else timeout
+        self.election_timeout = create_timeout() if timeout is None else timeout
         self.state = MachineState.FOLLOWER
         self.commit_index = 0
         self.last_applied = 0
@@ -32,14 +36,14 @@ class RaftMachine:
         assert num_servers % 2 != 0, "Only supporting an odd number of servers for now"
 
     def __repr__(self) -> str:
-        return f"Server={self.server_id} {self.state} Clock={self.clock}"
+        return f"Server={self.server_id} Clock={self.clock} Term={self.current_term} {self.state} "
 
     def increment_clock(self) -> None:
         assert (
             self.clock < self.election_timeout
         ), "Error, Clock is already past the election timeout"
 
-        print(self)
+        # print(self)
 
         if self.state == MachineState.LEADER:
             return
@@ -58,6 +62,7 @@ class RaftMachine:
         self.voted_for = self.server_id
         self.state = MachineState.CANDIDATE
         self.reset_clock()
+        self.election_timeout = create_timeout()
 
     def convert_to_leader(self) -> None:
         self.state = MachineState.LEADER
