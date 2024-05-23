@@ -67,6 +67,7 @@ class SocketServer:
         client = self.connections[address]
         while True:
             message = self.protocol.receive_message(client)
+            print(f"Message: {message.decode()}")
             self.inbox.put(message)
 
     def handle_outbox(self, address: Address) -> None:

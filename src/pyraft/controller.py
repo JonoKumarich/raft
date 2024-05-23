@@ -39,8 +39,8 @@ class Controller:
         self.machine = machine
         self.log = Log()  # TODO: Should this be in the controller or the state machine?
         self.queue: queue.Queue[Action] = queue.Queue()
-        self.time_dilation = 1.0
-        self.heartbeat_frequency = 2
+        self.time_dilation = 0.5
+        self.heartbeat_frequency = 5
         self.active = True
 
         # This handles the actions via a queue instead of instantly to avoid race conditions

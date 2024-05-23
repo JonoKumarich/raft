@@ -10,20 +10,17 @@ class MachineState(Enum):
 
 
 def create_timeout() -> int:
-    return random.randint(3, 10)
+    return random.randint(15, 25)
 
 
 class RaftMachine:
-    def __init__(
-        self, server_id: int, num_servers: int, timeout: Optional[int] = None
-    ) -> None:
+    def __init__(self, server_id: int, num_servers: int) -> None:
         self.server_id = server_id
         self.num_servers = num_servers
         self.current_term = 1
         self.voted_for: Optional[int] = None
         self.clock = 0
-        # TODO: Should this be reinitialized every timeout?
-        self.election_timeout = create_timeout() if timeout is None else timeout
+        self.election_timeout = create_timeout()
         self.state = MachineState.FOLLOWER
         self.commit_index = 0
         self.last_applied = 0
@@ -40,15 +37,15 @@ class RaftMachine:
 
     def increment_clock(self) -> None:
         assert (
-            self.clock < self.election_timeout
+            self.clock < self.election_timeout or self.is_leader
         ), "Error, Clock is already past the election timeout"
 
-        # print(self)
+        print(self)
+
+        self.clock += 1
 
         if self.state == MachineState.LEADER:
             return
-
-        self.clock += 1
 
         if self.clock >= self.election_timeout:
             self.attempt_candidacy()

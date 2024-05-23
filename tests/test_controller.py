@@ -1,8 +1,8 @@
 import pytest
 
-from pyraft.controller import Action, ActionKind, Controller
+from pyraft.controller import ActionKind, Controller
 from pyraft.message import RequestVote
-from pyraft.server import MockServer, Server
+from pyraft.server import MockServer
 from pyraft.state import RaftMachine
 
 NUM_SERVERS = 5
