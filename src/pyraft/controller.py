@@ -164,6 +164,7 @@ class Controller:
             self._handle_item(action)
 
     def _append_entry_success(self, append_entry: AppendEntries) -> bool:
+        # Rule 1: Reply false if term < currentTerm (§5.1)
         if append_entry.term < self.machine.current_term:
             return False
 
@@ -175,7 +176,8 @@ class Controller:
         if last_log is None:
             return False
 
-        if last_log.term != append_entry.term:
+        # Rule 2: Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+        if last_log.term != append_entry.prev_log_term:
             return False
 
         return True
@@ -193,6 +195,20 @@ class Controller:
 
         if success:
             self.machine.update_term(append_entry.term)
+
+            # Rule 3: If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
+            existing_entry = self.log.get(append_entry.log_entry_starting_index)
+            if existing_entry is not None:
+                if existing_entry.term == append_entry.term:
+                    self.log.delete_existing_from(append_entry.log_entry_starting_index)
+
+            # Rule 4: Append any new entries not already in the log
+            for entry in append_entry.entries:
+                self.log.append_entry(value=entry, term=append_entry.term)
+
+            # Rule 5: If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+            new_log_length = self.log.last_index + len(append_entry.entries)
+            self.machine.update_commit_index(append_entry.leader_commit, new_log_length)
 
         response = AppendEntriesResponse(
             term=self.machine.current_term,
@@ -286,8 +302,10 @@ class Controller:
             )
             return
 
-        is_heartbeat = self.machine.clock % self.heartbeat_frequency == 0
-        if is_heartbeat and self.machine.is_leader:
+        if not self.machine.is_leader:
+            return
+
+        if self.machine.clock % self.heartbeat_frequency == 0:
             self.send_heartbeat()
 
         # TODO:

@@ -11,6 +11,10 @@ class AppendEntries(BaseModel):
     entries: list[Any]
     leader_commit: int
 
+    @property
+    def log_entry_starting_index(self) -> index:
+        return self.prev_log_index
+
 
 class AppendEntriesResponse(BaseModel):
     term: int

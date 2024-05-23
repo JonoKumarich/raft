@@ -122,3 +122,9 @@ class RaftMachine:
 
         self.state = MachineState.FOLLOWER
         self.reset_clock()
+
+    def update_commit_index(self, leader_commit: int, new_log_length: int) -> None:
+        if self.commit_index <= leader_commit:
+            return
+
+        self.commit_index = min(leader_commit, new_log_length)
