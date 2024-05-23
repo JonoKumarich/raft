@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pyraft.controller import Controller
 from pyraft.server import SocketServer
 from pyraft.state import RaftMachine
+from pyraft.storage import LocalDataStore
 
 SERVER_NODES = {
     0: ("127.0.0.1", 20000),
@@ -35,7 +36,7 @@ class Network:
         threading.Thread(target=server.run, daemon=True).start()
 
         controller = Controller(
-            server, RaftMachine(server.server_id, self.network_size)
+            server, RaftMachine(server.server_id, self.network_size), LocalDataStore()
         )
         self.controllers[server.server_id] = controller
         controller.run()

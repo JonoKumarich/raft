@@ -17,7 +17,7 @@ class RaftMachine:
     def __init__(self, server_id: int, num_servers: int) -> None:
         self.server_id = server_id
         self.num_servers = num_servers
-        self.current_term = 1
+        self.current_term = 0
         self.voted_for: Optional[int] = None
         self.clock = 0
         self.election_timeout = create_timeout()
@@ -122,10 +122,3 @@ class RaftMachine:
 
         self.state = MachineState.FOLLOWER
         self.reset_clock()
-
-    def update_commits(self) -> None:
-        if self.commit_index <= self.last_applied:
-            return
-
-        self.last_applied += 1
-        # TODO: Apply log[last applied] to state machine

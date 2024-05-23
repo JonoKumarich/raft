@@ -2,11 +2,12 @@ import json
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any
 
-from pyraft.log import Log
+from pyraft.log import RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -15,6 +16,7 @@ from pyraft.message import (
 )
 from pyraft.server import Server, SocketServer
 from pyraft.state import MachineState, RaftMachine
+from pyraft.storage import DataStore, LocalDataStore
 
 
 class ActionKind(Enum):
@@ -31,20 +33,28 @@ class Action:
     data: Any
 
 
+# TODO: Update currentTerm, votedFor, log[] on stable storage before responding to RPCs
+
+
 class Controller:
     def __init__(
-        self, server: Server, machine: RaftMachine, networked: bool = True
+        self,
+        server: Server,
+        machine: RaftMachine,
+        datastore: DataStore,
+        networked: bool = True,
     ) -> None:
         self.server = server
         self.machine = machine
-        self.log = Log()  # TODO: Should this be in the controller or the state machine?
+        # TODO: Should this be in the controller or the state machine?
+        self.log = RaftLog()
         self.queue: queue.Queue[Action] = queue.Queue()
         self.time_dilation = 0.5
         self.heartbeat_frequency = 5
         self.active = True
+        self.datastore = datastore
 
-        # This handles the actions via a queue instead of instantly to avoid race conditions
-        # Can be turned off to help with testing
+        # This handles the actions via a queue instead to avoid race conditions. It should be turned off for testing purposes only
         self.networked = networked
 
     def run(self) -> None:
@@ -56,6 +66,7 @@ class Controller:
             continue
 
     def toggle_active_status(self) -> bool:
+        # TODO: If toggleing back on, reset the state machines volatile state to mock a server going down
         self.active = not self.active
         return self.active
 
@@ -189,13 +200,13 @@ class Controller:
         )
 
         message = b"append_entries_response " + response.model_dump_json().encode()
+        self.update_persistent_storage()
         self.server.send_to_single_node(append_entry.leader_id, message)
 
         if not success:
             return
 
         self.machine.reset_clock()
-        self.machine.update_commits()
 
     def handle_append_entries_response(
         self, append_entry_response: AppendEntriesResponse
@@ -232,6 +243,7 @@ class Controller:
             self.machine.reset_clock()
             # NOTE: said that the clock doesn't need to reset here in excalidraw, but it looks like it does in the simulation
 
+        self.update_persistent_storage()
         response = RequestVoteResponse(
             server_id=self.server.server_id,
             term=self.machine.current_term,
@@ -297,10 +309,17 @@ class Controller:
             b"append_entries " + data.model_dump_json().encode()
         )
 
+    def update_persistent_storage(self) -> None:
+        self.datastore.store_term(self.machine.current_term)
+        self.datastore.store_vote(self.machine.voted_for)
+        self.datastore.store_log(self.log)
+
 
 if __name__ == "__main__":
     host, port = ("127.0.0.1", 20000)
     controller = Controller(
-        server=SocketServer(host, port, {0: (host, port)}, 0), machine=RaftMachine(1, 1)
+        server=SocketServer(host, port, {0: (host, port)}, 0),
+        machine=RaftMachine(1, 1),
+        datastore=LocalDataStore(),
     )
     controller.run()

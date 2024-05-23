@@ -4,12 +4,13 @@ from typing import Any, Optional
 
 @dataclass
 class LogEntry:
+    uuid: str
     value: Any
     term: int
     commited: bool
 
 
-class Log:
+class RaftLog:
     def __init__(self) -> None:
         self.items: list[LogEntry] = []
 
@@ -35,3 +36,11 @@ class Log:
     @property
     def latest_commit(self) -> int:
         return len([item for item in self.items if item.commited])
+
+    def commit_entry(self, index: int) -> None:
+
+        entry = self.get(index)
+        assert entry is not None, "Can not commit emptry entry"
+
+        entry.commited = True
+        assert self.get(index).commited == True  # can remove when verified
