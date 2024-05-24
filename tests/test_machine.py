@@ -1,3 +1,5 @@
+from pyraft.log import RaftLog
+from pyraft.message import RequestVote
 from pyraft.state import MachineState, RaftMachine
 
 """
@@ -8,7 +10,8 @@ Things to test:
 
 
 def test_follower_timeout():
-    m = RaftMachine(1, 1, 5)
+    m = RaftMachine(1, 1)
+    m.election_timeout = 5
     start_term = m.current_term
 
     assert m.clock == 0
@@ -26,7 +29,7 @@ def test_follower_timeout():
 
 
 def test_candidacy_and_vote_counter():
-    m = RaftMachine(1, 5, 5)
+    m = RaftMachine(1, 5)
 
     assert m.num_votes_received == 0
     m.attempt_candidacy()
@@ -51,7 +54,7 @@ def test_candidacy_and_vote_counter():
 
 
 def test_majority_calculation():
-    m = RaftMachine(1, 5, 5)
+    m = RaftMachine(1, 5)
     m.attempt_candidacy()
     assert not m.has_majority
     m.add_vote(2)
@@ -63,3 +66,9 @@ def test_majority_calculation():
     m.demote_to_follower()
     m.attempt_candidacy()
     assert not m.has_majority
+
+
+def test_initial_request_vote_valid():
+    m = RaftMachine(0, 5)
+    req = RequestVote(term=1, candidate_id=1, last_log_index=0, last_log_term=0)
+    assert m._request_vote_valid(req)

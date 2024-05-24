@@ -34,27 +34,19 @@ class Action:
     data: Any
 
 
-# TODO: Update currentTerm, votedFor, log[] on stable storage before responding to RPCs
-
-
 class Controller:
     def __init__(
         self,
         server: Server,
         machine: RaftMachine,
-        datastore: DataStore,
         networked: bool = True,
     ) -> None:
         self.server = server
         self.machine = machine
-        # TODO: Should this be in the controller or the state machine?
-        self.log = RaftLog()
         self.queue: queue.Queue[Action] = queue.Queue()
         self.time_dilation = 0.5
-        self.heartbeat_frequency = 5
         self.active = True
-        self.datastore = datastore
-        self.pending_append_entry_responses: dict[str, int] = {}
+        self.num_append_entry_responses: dict[str, int] = {}
 
         # This handles the actions via a queue instead to avoid race conditions. It should be turned off for testing purposes only
         self.networked = networked
@@ -151,18 +143,50 @@ class Controller:
 
         match action.kind:
             case ActionKind.APPEND_ENTRIES:
-                self.handle_append_entries(action.data)
+                append_messages = self.machine.handle_append_entries(action.data)
+
+                self.server.send_to_single_node(
+                    action.data.leader_id,
+                    b"append_entries_response "
+                    + append_messages.model_dump_json().encode(),
+                )
             case ActionKind.APPEND_ENTRIES_RESPONSE:
-                self.handle_append_entries_response(action.data)
+                self.machine.handle_append_entries_response(action.data)
             case ActionKind.REQUEST_VOTE:
-                self.handle_request_vote(action.data)
+                vote_message = self.machine.handle_request_vote(action.data)
+                self.server.send_to_single_node(
+                    action.data.candidate_id,
+                    b"request_vote_response " + vote_message.model_dump_json().encode(),
+                )
             case ActionKind.REQUEST_VOTE_RESPONSE:
-                self.handle_request_vote_reponse(action.data)
+                promotion_message = self.machine.handle_request_vote_response(
+                    action.data
+                )
+                if promotion_message is None:
+                    return
+
+                self.server.send_to_all_nodes(
+                    b"append_entries " + promotion_message.model_dump_json().encode()
+                )
             case ActionKind.TICK:
-                self.handle_tick()
+                tick_message = self.machine.handle_tick()
+                if tick_message is None:
+                    return
+
+                encoded = tick_message.model_dump_json().encode()
+
+                if isinstance(tick_message, AppendEntries):
+                    self.server.send_to_all_nodes(b"append_entries " + encoded)
+                    return
+                elif isinstance(tick_message, RequestVote):
+                    self.server.send_to_all_nodes(b"request_vote " + encoded)
+                    return
+
+                raise ValueError(f"Unexpected message type: {type(tick_message)}")
             case ActionKind.MESSAGE:
-                # NOTE: Only handling single length entries for now
-                self.send_append_entries(entries=[action.data])
+                # TODO: This should not send a separate heartbeat, but put the entry into the next hearbeat
+                # self.send_append_entries(entries=[action.data])
+                raise NotImplementedError
             case _:
                 raise ValueError("action not detected")
 
@@ -171,168 +195,11 @@ class Controller:
             action = self.queue.get()
             self._handle_item(action)
 
-    def handle_append_entries(self, append_entry: AppendEntries) -> None:
-        if self.machine.is_candidate and self.machine.current_term <= append_entry.term:
-            self.machine.demote_to_follower()
-
-        if self.machine.is_leader and self.machine.current_term < append_entry.term:
-            self.machine.demote_to_follower()
-
-        self.machine.update_term(append_entry.term)
-        try:
-            if len(append_entry.entries) > 0:
-                self.log.append_entry(
-                    append_entry.prev_log_index,
-                    append_entry.prev_log_term,
-                    append_entry.term,
-                    append_entry.entries,
-                )
-                print(f"Log for server {self.server.server_id} updated: {self.log}")
-            success = True
-
-            # Rule 5: If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
-            if append_entry.leader_commit > self.machine.commit_index:
-                self.machine.update_commit_index(
-                    append_entry.leader_commit, self.log.last_index
-                )
-        except AppendEntriedFailedError:
-            success = False
-
-        response = AppendEntriesResponse(
-            uuid=append_entry.uuid,
-            term=self.machine.current_term,
-            success=success,
-        )
-
-        message = b"append_entries_response " + response.model_dump_json().encode()
-        self.update_persistent_storage()
-        self.server.send_to_single_node(append_entry.leader_id, message)
-
-        if not success:
-            return
-
-        self.machine.reset_clock()
-
-    def handle_append_entries_response(
-        self, append_entry_response: AppendEntriesResponse
-    ) -> None:
-        # TODO: Empty implementation for now
-        pass
-
-    def _request_vote_success(self, request_vote: RequestVote) -> bool:
-        term_is_greater = request_vote.last_log_term > self.log.last_term
-        index_is_greater = (
-            request_vote.last_log_term == self.log.last_term
-            and request_vote.last_log_index >= self.log.last_index
-        )
-        already_voted_for = self.machine.voted_for == request_vote.candidate_id
-        no_votes = self.machine.voted_for is None
-
-        if request_vote.term < self.machine.current_term:
-            return False
-
-        if (no_votes or already_voted_for) and (term_is_greater or index_is_greater):
-            return True
-
-        return False
-
-    def handle_request_vote(self, request_vote: RequestVote) -> None:
-
-        if request_vote.term > self.machine.current_term:
-            self.machine.update_term(request_vote.term)
-
-        success = self._request_vote_success(request_vote)
-
-        if success:
-            self.machine.voted_for = request_vote.candidate_id
-            self.machine.reset_clock()
-            # NOTE: said that the clock doesn't need to reset here in excalidraw, but it looks like it does in the simulation
-
-        self.update_persistent_storage()
-        response = RequestVoteResponse(
-            server_id=self.server.server_id,
-            term=self.machine.current_term,
-            vote_granted=success,
-        )
-
-        message = b"request_vote_response " + response.model_dump_json().encode()
-        self.server.send_to_single_node(request_vote.candidate_id, message)
-
-    def handle_request_vote_reponse(
-        self, request_vote_response: RequestVoteResponse
-    ) -> None:
-
-        # Skip remaining votes responses after obtaining a majority
-        if self.machine.is_leader:
-            return
-
-        if request_vote_response.vote_granted:
-            self.machine.add_vote(request_vote_response.server_id)
-
-        if self.machine.is_leader:
-            self.send_append_entries()
-
-    def handle_tick(self) -> None:
-        self.machine.increment_clock()
-
-        is_election_start = self.machine.clock == 0 and self.machine.is_candidate
-        if is_election_start:
-            print("starting election")
-
-            data = RequestVote(
-                term=self.machine.current_term,
-                candidate_id=self.server.server_id,
-                last_log_index=self.log.last_index,
-                last_log_term=self.log.last_term,
-            )
-
-            self.server.send_to_all_nodes(
-                b"request_vote " + data.model_dump_json().encode()
-            )
-            return
-
-        if not self.machine.is_leader:
-            return
-
-        if self.machine.clock % self.heartbeat_frequency == 0:
-            self.send_append_entries()
-
-        # TODO:
-        # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-        #     • If successful: update nextIndex and matchIndex for follower (§5.3)
-        #     • If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
-
-    def send_append_entries(self, entries: Optional[list[Any]] = None) -> None:
-        id = str(uuid.uuid4())
-        if entries is None:
-            entries = []
-            self.pending_append_entry_responses[id] = 0
-
-        data = AppendEntries(
-            uuid=id,
-            term=self.machine.current_term,
-            leader_id=self.machine.server_id,
-            prev_log_term=self.log.last_term,
-            prev_log_index=self.log.last_index,
-            entries=entries,
-            leader_commit=self.log.latest_commit,
-        )
-
-        self.server.send_to_all_nodes(
-            b"append_entries " + data.model_dump_json().encode()
-        )
-
-    def update_persistent_storage(self) -> None:
-        self.datastore.store_term(self.machine.current_term)
-        self.datastore.store_vote(self.machine.voted_for)
-        self.datastore.store_log(self.log)
-
 
 if __name__ == "__main__":
     host, port = ("127.0.0.1", 20000)
     controller = Controller(
         server=SocketServer(host, port, {0: (host, port)}, 0),
         machine=RaftMachine(1, 1),
-        datastore=LocalDataStore(),
     )
     controller.run()

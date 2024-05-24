@@ -67,7 +67,6 @@ class SocketServer:
         client = self.connections[address]
         while True:
             message = self.protocol.receive_message(client)
-            print(f"Message: {message.decode()}")
             self.inbox.put(message)
 
     def handle_outbox(self, address: Address) -> None:
@@ -92,7 +91,7 @@ class SocketServer:
             self.protocol.send_message(client, message)
 
     def send_to_all_nodes(self, message: bytes) -> None:
-        for address in self.server_mappings.values():
+        for id, address in self.server_mappings.items():
 
             # We need to actually create this outbox as we lazily create connection sockets
             if address not in self.outbox.values():
@@ -100,6 +99,7 @@ class SocketServer:
                     target=self.handle_outbox, args=(address,), daemon=True
                 ).start()
 
+            print(f"Message: {self.server_id}->{id} ({message})")
             self.outbox[address].put(message)
 
     def send_to_single_node(self, server_id: int, message: bytes) -> None:
@@ -110,6 +110,7 @@ class SocketServer:
                 target=self.handle_outbox, args=(address,), daemon=True
             ).start()
 
+        print(f"Message: {self.server_id}->{server_id} ({message})")
         self.outbox[address].put(message)
 
 

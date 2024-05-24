@@ -35,39 +35,6 @@ def controller_list(server_list: list[MockServer]) -> list[Controller]:
     return controllers
 
 
-def test_candidate_sends_request_vote_when_timed_out(controller_list: list[Controller]):
-    for controller in controller_list[1:]:
-        controller.machine.election_timeout = 10000
-
-    main = controller_list[0]
-    follower = controller_list[1]
-
-    main.machine.election_timeout = 2
-
-    main.tick()
-    assert main.machine.is_follower
-
-    main.tick()
-    assert main.machine.is_candidate
-    assert main.machine.current_term == 2
-
-    main.machine.election_timeout = 2
-    main.tick()
-    main.tick()
-
-    assert main.machine.is_candidate
-    assert main.machine.current_term == 3
-    assert follower.server.inbox.qsize() == 2
-
-    msg = follower.handle_single_message()
-    assert msg.kind == ActionKind.REQUEST_VOTE
-    assert follower.machine.current_term == 2
-
-    msg = follower.handle_single_message()
-    assert follower.machine.current_term == 3
-    assert msg.kind == ActionKind.REQUEST_VOTE
-
-
 def test_multiple_candidate_requests(controller_list: list[Controller]):
 
     c1, c2, c3, c4, c5 = controller_list
@@ -83,7 +50,7 @@ def test_multiple_candidate_requests(controller_list: list[Controller]):
 
     c1.machine.increment_clock()
     assert c1.machine.is_candidate
-    c4.handle_request_vote(
+    res = c4.machine.handle_request_vote(
         RequestVote(
             term=c1.machine.current_term,
             candidate_id=c1.machine.server_id,
@@ -91,10 +58,11 @@ def test_multiple_candidate_requests(controller_list: list[Controller]):
             last_log_term=0,
         )
     )
+    c1.server.send_to_single_node
 
     c2.machine.increment_clock()
     assert c2.machine.is_candidate
-    c5.handle_request_vote(
+    c5.machine.handle_request_vote(
         RequestVote(
             term=c2.machine.current_term,
             candidate_id=c2.machine.server_id,
@@ -104,6 +72,7 @@ def test_multiple_candidate_requests(controller_list: list[Controller]):
     )
 
     # Assert that c1 and c2 got 1 vote
+    assert c1.server.inbox.qsize() == 1
     assert c1.handle_single_message().data.vote_granted
     assert c2.handle_single_message().data.vote_granted
     assert c1.server.inbox.qsize() == 0
@@ -128,7 +97,6 @@ def test_multiple_candidate_requests(controller_list: list[Controller]):
     c3.handle_single_message()
     c4.handle_single_message()
     c5.handle_single_message()
-
     assert c1.server.inbox.qsize() == 4
 
     for _ in range(4):

@@ -36,7 +36,7 @@ class Network:
         threading.Thread(target=server.run, daemon=True).start()
 
         controller = Controller(
-            server, RaftMachine(server.server_id, self.network_size), LocalDataStore()
+            server, RaftMachine(server.server_id, self.network_size)
         )
         self.controllers[server.server_id] = controller
         controller.run()

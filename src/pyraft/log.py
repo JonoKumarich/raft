@@ -12,6 +12,7 @@ class LogEntry:
 # TODO: Can test figure 8 in the paper
 
 
+# Errors we should have, Terms don't match. Log not caught up
 class AppendEntriedFailedError(Exception):
     pass
 
@@ -30,6 +31,7 @@ class RaftLog:
 
         return self._items[index - 1]
 
+    # TODO: should pass in a list of LogEntry
     def append_entry(
         self, prev_log_index: int, prev_log_term: int, term: int, entries: list[Any]
     ) -> None:
@@ -57,6 +59,7 @@ class RaftLog:
         if existing_entry is not None and existing_entry.term != term:
             self.delete_existing_from(new_item_index)
 
+        # TODO: Will need to check for conflicts of ALL entries first and truncate ^^, then we can extend if all have passed
         self._items.extend(entries)
 
     @property
