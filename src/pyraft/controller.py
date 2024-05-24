@@ -5,9 +5,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Optional
 
-from pyraft.log import RaftLog
+from pyraft.log import AppendEntriedFailedError, RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -25,6 +25,7 @@ class ActionKind(Enum):
     REQUEST_VOTE = auto()
     REQUEST_VOTE_RESPONSE = auto()
     TICK = auto()
+    MESSAGE = auto()
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Controller:
         self.heartbeat_frequency = 5
         self.active = True
         self.datastore = datastore
+        self.pending_append_entry_responses: dict[str, int] = {}
 
         # This handles the actions via a queue instead to avoid race conditions. It should be turned off for testing purposes only
         self.networked = networked
@@ -85,6 +87,9 @@ class Controller:
     def _process_message(message: bytes) -> Action:
         command, data = message.split(maxsplit=1)
         command = command.decode()
+
+        if command == "message":
+            return Action(ActionKind.MESSAGE, data)
 
         try:
             data = json.loads(data)
@@ -155,6 +160,9 @@ class Controller:
                 self.handle_request_vote_reponse(action.data)
             case ActionKind.TICK:
                 self.handle_tick()
+            case ActionKind.MESSAGE:
+                # NOTE: Only handling single length entries for now
+                self.send_append_entries(entries=[action.data])
             case _:
                 raise ValueError("action not detected")
 
@@ -163,54 +171,35 @@ class Controller:
             action = self.queue.get()
             self._handle_item(action)
 
-    def _append_entry_success(self, append_entry: AppendEntries) -> bool:
-        # Rule 1: Reply false if term < currentTerm (§5.1)
-        if append_entry.term < self.machine.current_term:
-            return False
-
-        no_logs = append_entry.prev_log_index == 0 and self.log.last_index == 0
-        if no_logs:
-            return True
-
-        last_log = self.log.get(append_entry.prev_log_index)
-        if last_log is None:
-            return False
-
-        # Rule 2: Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-        if last_log.term != append_entry.prev_log_term:
-            return False
-
-        return True
-
     def handle_append_entries(self, append_entry: AppendEntries) -> None:
-        # TODO: Steps 3-5 of reciever implementation
-
         if self.machine.is_candidate and self.machine.current_term <= append_entry.term:
             self.machine.demote_to_follower()
 
         if self.machine.is_leader and self.machine.current_term < append_entry.term:
             self.machine.demote_to_follower()
 
-        success = self._append_entry_success(append_entry)
-
-        if success:
-            self.machine.update_term(append_entry.term)
-
-            # Rule 3: If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
-            existing_entry = self.log.get(append_entry.log_entry_starting_index)
-            if existing_entry is not None:
-                if existing_entry.term == append_entry.term:
-                    self.log.delete_existing_from(append_entry.log_entry_starting_index)
-
-            # Rule 4: Append any new entries not already in the log
-            for entry in append_entry.entries:
-                self.log.append_entry(value=entry, term=append_entry.term)
+        self.machine.update_term(append_entry.term)
+        try:
+            if len(append_entry.entries) > 0:
+                self.log.append_entry(
+                    append_entry.prev_log_index,
+                    append_entry.prev_log_term,
+                    append_entry.term,
+                    append_entry.entries,
+                )
+                print(f"Log for server {self.server.server_id} updated: {self.log}")
+            success = True
 
             # Rule 5: If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
-            new_log_length = self.log.last_index + len(append_entry.entries)
-            self.machine.update_commit_index(append_entry.leader_commit, new_log_length)
+            if append_entry.leader_commit > self.machine.commit_index:
+                self.machine.update_commit_index(
+                    append_entry.leader_commit, self.log.last_index
+                )
+        except AppendEntriedFailedError:
+            success = False
 
         response = AppendEntriesResponse(
+            uuid=append_entry.uuid,
             term=self.machine.current_term,
             success=success,
         )
@@ -281,7 +270,7 @@ class Controller:
             self.machine.add_vote(request_vote_response.server_id)
 
         if self.machine.is_leader:
-            self.send_heartbeat()
+            self.send_append_entries()
 
     def handle_tick(self) -> None:
         self.machine.increment_clock()
@@ -306,20 +295,26 @@ class Controller:
             return
 
         if self.machine.clock % self.heartbeat_frequency == 0:
-            self.send_heartbeat()
+            self.send_append_entries()
 
         # TODO:
         # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
         #     • If successful: update nextIndex and matchIndex for follower (§5.3)
         #     • If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
 
-    def send_heartbeat(self) -> None:
+    def send_append_entries(self, entries: Optional[list[Any]] = None) -> None:
+        id = str(uuid.uuid4())
+        if entries is None:
+            entries = []
+            self.pending_append_entry_responses[id] = 0
+
         data = AppendEntries(
+            uuid=id,
             term=self.machine.current_term,
             leader_id=self.machine.server_id,
             prev_log_term=self.log.last_term,
             prev_log_index=self.log.last_index,
-            entries=[],
+            entries=entries,
             leader_commit=self.log.latest_commit,
         )
 

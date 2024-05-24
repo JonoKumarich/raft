@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 
 class AppendEntries(BaseModel):
+    uuid: str
     term: int
     leader_id: int
     prev_log_index: int
@@ -11,12 +12,9 @@ class AppendEntries(BaseModel):
     entries: list[Any]
     leader_commit: int
 
-    @property
-    def log_entry_starting_index(self) -> index:
-        return self.prev_log_index
-
 
 class AppendEntriesResponse(BaseModel):
+    uuid: str
     term: int
     success: bool
 

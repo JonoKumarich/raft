@@ -59,8 +59,9 @@ class Network:
                     self.controllers[server_num].timeout()
                     print(f"Timed out server {server_num}")
                 case "m":
-                    # TODO: On m+number, create a client and send a message to that server
-                    print("m command not yet implemented")
+                    message = b"message weewooweewoo"
+                    self.controllers[server_num].server.inbox.put(message)
+                    print(f"Sent message to {message.decode()} server {server_num}")
                 case _:
                     print(f"Command not recognised: {command}")
 

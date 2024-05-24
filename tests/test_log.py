@@ -1,4 +1,4 @@
-from pyraft.log import LogEntry, RaftLog
+from pyraft.log import RaftLog
 
 
 def test_delete_existing_from():
@@ -8,10 +8,10 @@ def test_delete_existing_from():
     for _ in range(num_entries):
         log.append_entry(None, 1)
 
-    assert len(log.items) == num_entries
+    assert len(log._items) == num_entries
     to_delete = 3
     log.delete_existing_from(to_delete)
-    assert len(log.items) == num_entries - to_delete
+    assert len(log._items) == num_entries - to_delete
 
 
 def test_last_index_amount():
