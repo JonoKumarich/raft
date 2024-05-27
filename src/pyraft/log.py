@@ -1,15 +1,50 @@
 from dataclasses import dataclass
-from typing import Any, Optional
+from enum import Enum, auto
+from typing import Any, Optional, Self
+
+
+class Instruction(Enum):
+    GET = "get"
+    SET = "set"
+    ADD = "add"
+
+    @classmethod
+    def from_text(cls, text: str) -> "Instruction":
+        return {
+            "get": cls.GET,
+            "set": cls.SET,
+            "add": cls.ADD,
+        }[text.lower()]
+
+
+@dataclass
+class Command:
+    instruction: Instruction
+    key: str
+    value: Optional[int]
 
 
 @dataclass
 class LogEntry:
-    value: Any
     term: int
-    commited: bool
+    command: Command
 
+    @classmethod
+    def from_bytes(cls, input: bytes, term: int) -> "LogEntry":
+        instruction, value = input.split(maxsplit=1)
+        instruction = Instruction.from_text(instruction.decode())
 
-# TODO: Can test figure 8 in the paper
+        match instruction:
+            case Instruction.SET:
+                key, value = value.split(maxsplit=1)
+                command = Command(instruction, key.decode(), int(value))
+            case _:
+                raise NotImplementedError
+
+        return cls(term, command)
+
+    def __repr__(self) -> str:
+        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value}"
 
 
 # Errors we should have, Terms don't match. Log not caught up
@@ -31,13 +66,11 @@ class RaftLog:
 
         return self._items[index - 1]
 
-    # TODO: should pass in a list of LogEntry
     def append_entry(
-        self, prev_log_index: int, prev_log_term: int, term: int, entries: list[Any]
+        self, prev_log_index: int, prev_log_term: int, entries: list[LogEntry]
     ) -> None:
-        entries = [
-            LogEntry(value=value, term=term, commited=False) for value in entries
-        ]
+        if len(entries) == 0:
+            return
 
         if prev_log_index == 0:
             self._items.extend(entries)
@@ -54,12 +87,13 @@ class RaftLog:
             )
 
         # Rule 3: If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
-        new_item_index = prev_log_index + 1
-        existing_entry = self.get(new_item_index)
-        if existing_entry is not None and existing_entry.term != term:
-            self.delete_existing_from(new_item_index)
+        for i, entry in enumerate(entries, start=1):
+            new_item_index = prev_log_index + i
+            existing_entry = self.get(new_item_index)
+            if existing_entry is not None and existing_entry.term != entry.term:
+                self.delete_existing_from(new_item_index)
+                break
 
-        # TODO: Will need to check for conflicts of ALL entries first and truncate ^^, then we can extend if all have passed
         self._items.extend(entries)
 
     @property
@@ -74,22 +108,11 @@ class RaftLog:
         return len(self._items)
 
     @property
-    def latest_commit(self) -> int:
-        return len([item for item in self._items if item.commited])
-
-    @property
     def max_term(self) -> int:
         if len(self._items) == 0:
             return -1
 
         return max([item.term for item in self._items])
-
-    def commit_entry(self, index: int) -> None:
-        # TODO: Assert all preceeding entries are also commited first
-        entry = self.get(index)
-        assert entry is not None, "Can not commit emptry entry"
-
-        entry.commited = True
 
     def delete_existing_from(self, index: int) -> None:
         self._items = self._items[: index - 1]

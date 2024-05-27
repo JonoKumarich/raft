@@ -59,7 +59,7 @@ class Network:
                     self.controllers[server_num].timeout()
                     print(f"Timed out server {server_num}")
                 case "m":
-                    message = b"message weewooweewoo"
+                    message = b"message set foo 1"
                     self.controllers[server_num].server.inbox.put(message)
                     print(f"Sent message to {message.decode()} server {server_num}")
                 case _:

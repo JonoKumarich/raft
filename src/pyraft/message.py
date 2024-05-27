@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from pyraft.log import LogEntry
+
 
 class AppendEntries(BaseModel):
     uuid: str
@@ -9,7 +11,7 @@ class AppendEntries(BaseModel):
     leader_id: int
     prev_log_index: int
     prev_log_term: int
-    entries: list[Any]
+    entries: list[LogEntry]
     leader_commit: int
 
 
@@ -17,6 +19,7 @@ class AppendEntriesResponse(BaseModel):
     uuid: str
     term: int
     success: bool
+    # TODO: Replication id
 
 
 class RequestVote(BaseModel):

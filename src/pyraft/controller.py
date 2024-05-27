@@ -60,7 +60,7 @@ class Controller:
             continue
 
     def toggle_active_status(self) -> bool:
-        # TODO: If toggleing back on, reset the state machines volatile state to mock a server going down
+        # TODO: If toggling back on, reset the state machines volatile state to mock a server going down
         self.active = not self.active
         return self.active
 
@@ -184,9 +184,14 @@ class Controller:
 
                 raise ValueError(f"Unexpected message type: {type(tick_message)}")
             case ActionKind.MESSAGE:
-                # TODO: This should not send a separate heartbeat, but put the entry into the next hearbeat
-                # self.send_append_entries(entries=[action.data])
-                raise NotImplementedError
+                if not self.machine.is_leader:
+                    # TODO: Send a response containing the leader id
+                    # This should be stored on the state machine
+                    # When server recieves a message, it should also be able to send a response back
+                    print("Can only send messages to the leader node")
+                    return
+
+                self.machine.pending_entries.put(action.data)
             case _:
                 raise ValueError("action not detected")
 

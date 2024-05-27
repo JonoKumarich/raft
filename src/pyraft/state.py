@@ -1,9 +1,10 @@
+import queue
 import random
 import uuid
 from enum import Enum, auto
 from typing import Optional
 
-from pyraft.log import RaftLog
+from pyraft.log import LogEntry, RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -23,7 +24,6 @@ def create_timeout() -> int:
     return random.randint(15, 25)
 
 
-# TODO: These functions should actually take in a rpc and output an rpc response
 class RaftMachine:
     def __init__(
         self, server_id: int, num_servers: int, datastore: DataStore = LocalDataStore()
@@ -41,6 +41,7 @@ class RaftMachine:
         self.log = RaftLog()
         self.datastore = datastore
         self.heartbeat_freq = 5
+        self.pending_entries: queue.Queue[bytes] = queue.Queue()
 
         # Leader Volatile state
         self.next_index: dict[int, int] = {}
@@ -71,18 +72,23 @@ class RaftMachine:
         if not self.is_leader:
             return None
 
-        if self.clock % self.heartbeat_freq == 0:
-            return AppendEntries(
-                uuid=str(uuid.uuid4()),
-                term=self.current_term,
-                leader_id=self.server_id,
-                prev_log_index=self.log.last_index,
-                prev_log_term=self.log.last_term,
-                entries=[],
-                leader_commit=self.log.latest_commit,
-            )
+        if self.clock % self.heartbeat_freq != 0:
+            return None
 
-        return None
+        entries_to_process: list[LogEntry] = []
+        while not self.pending_entries.empty():
+            entry = self.pending_entries.get()
+            entries_to_process.append(LogEntry.from_bytes(entry, self.current_term))
+
+        return AppendEntries(
+            uuid=str(uuid.uuid4()),
+            term=self.current_term,
+            leader_id=self.server_id,
+            prev_log_index=self.log.last_index,
+            prev_log_term=self.log.last_term,
+            entries=entries_to_process,
+            leader_commit=self.commit_index,
+        )
 
     def _request_vote_valid(self, request_vote: RequestVote) -> bool:
         if request_vote.term != self.current_term:
@@ -139,7 +145,7 @@ class RaftMachine:
                 prev_log_index=self.log.last_index,
                 prev_log_term=self.log.last_term,
                 entries=[],
-                leader_commit=self.log.latest_commit,
+                leader_commit=self.commit_index,
             )
 
         return None
@@ -178,8 +184,18 @@ class RaftMachine:
         if self.is_leader and append_entries.term > self.current_term:
             self.demote_to_follower()
 
+        self.log.append_entry(
+            prev_log_index=append_entries.prev_log_index,
+            prev_log_term=append_entries.prev_log_term,
+            entries=append_entries.entries,
+        )
+
         if len(append_entries.entries) > 0:
-            raise NotImplementedError
+            print(
+                f"Server {self.server_id} commit_index={self.commit_index} log={self.log._items}"
+            )
+
+        self.update_commit_index(append_entries.leader_commit, self.log.last_index)
 
         return AppendEntriesResponse(
             uuid=append_entries.uuid, term=self.current_term, success=True
@@ -192,7 +208,7 @@ class RaftMachine:
         if not self.is_leader:
             return
 
-        # TODO:
+        # TODO: Handle counting replies to get a majority
         pass
 
     def increment_clock(self) -> None:
