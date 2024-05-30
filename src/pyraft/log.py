@@ -108,6 +108,13 @@ class RaftLog:
         return len(self._items)
 
     @property
+    def last_item(self) -> LogEntry:
+
+        item = self.get(self.last_index)
+        assert item is not None, "Can't get previous item in log as it is empty"
+        return item
+
+    @property
     def max_term(self) -> int:
         if len(self._items) == 0:
             return -1

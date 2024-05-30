@@ -6,7 +6,7 @@ from pyraft.log import LogEntry
 
 
 class AppendEntries(BaseModel):
-    uuid: str
+    uuid: str | None
     term: int
     leader_id: int
     prev_log_index: int
@@ -16,7 +16,8 @@ class AppendEntries(BaseModel):
 
 
 class AppendEntriesResponse(BaseModel):
-    uuid: str
+    server_id: int
+    uuid: str | None
     term: int
     success: bool
     # TODO: Replication id

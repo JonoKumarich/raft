@@ -1,6 +1,8 @@
 import queue
 import random
 import uuid
+from collections import defaultdict
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
@@ -44,8 +46,8 @@ class RaftMachine:
         self.pending_entries: queue.Queue[bytes] = queue.Queue()
 
         # Leader Volatile state
-        self.next_index: dict[int, int] = {}
-        self.match_index: dict[int, int] = {}
+        self.next_index: dict[int, int] = defaultdict(lambda: self.log.last_index + 1)
+        self.match_index: dict[int, int] = defaultdict(lambda: 0)
 
         assert num_servers % 2 != 0, "Only supporting an odd number of servers for now"
 
@@ -57,11 +59,10 @@ class RaftMachine:
         self.datastore.store_vote(self.voted_for)
         self.datastore.store_log(self.log)
 
-    def handle_tick(self) -> Optional[AppendEntries | RequestVote]:
+    def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntriesResponse]]:
         self.increment_clock()
 
-        is_election_start = self.clock == 0 and self.is_candidate
-        if is_election_start:
+        if self.is_election_start:
             return RequestVote(
                 term=self.current_term,
                 candidate_id=self.server_id,
@@ -69,26 +70,37 @@ class RaftMachine:
                 last_log_term=self.log.last_term,
             )
 
-        if not self.is_leader:
+        if not (self.is_leader and self.is_hearbeat_tick):
             return None
 
-        if self.clock % self.heartbeat_freq != 0:
-            return None
-
-        entries_to_process: list[LogEntry] = []
+        logs_to_process: list[LogEntry] = []
         while not self.pending_entries.empty():
             entry = self.pending_entries.get()
-            entries_to_process.append(LogEntry.from_bytes(entry, self.current_term))
+            logs_to_process.append(LogEntry.from_bytes(entry, self.current_term))
 
-        return AppendEntries(
-            uuid=str(uuid.uuid4()),
-            term=self.current_term,
-            leader_id=self.server_id,
-            prev_log_index=self.log.last_index,
-            prev_log_term=self.log.last_term,
-            entries=entries_to_process,
-            leader_commit=self.commit_index,
-        )
+        self.log.append_entry(self.log.last_index, self.log.last_term, logs_to_process)
+
+        entries_to_send = {}
+        for server_id in range(self.num_servers):
+            if server_id == self.server_id:
+                continue
+
+            if self.match_index[server_id] != self.commit_index:
+                self.match_index[server_id] -= 1
+                assert self.match_index[server_id] >= 0
+                logs_to_process.insert(0, self.log.last_item)
+
+            entries_to_send[server_id] = AppendEntries(
+                uuid=None if len(logs_to_process) == 0 else str(uuid.uuid4()),
+                term=self.current_term,
+                leader_id=self.server_id,
+                prev_log_index=self.log.last_index,
+                prev_log_term=self.log.last_term,
+                entries=logs_to_process,
+                leader_commit=self.commit_index,
+            )
+
+        return entries_to_send
 
     def _request_vote_valid(self, request_vote: RequestVote) -> bool:
         if request_vote.term != self.current_term:
@@ -139,7 +151,7 @@ class RaftMachine:
 
         if self.is_leader:
             return AppendEntries(
-                uuid=str(uuid.uuid4()),
+                uuid=None,
                 term=self.current_term,
                 leader_id=self.server_id,
                 prev_log_index=self.log.last_index,
@@ -173,7 +185,10 @@ class RaftMachine:
     ) -> AppendEntriesResponse:
         if not self._append_entries_valid(append_entries):
             return AppendEntriesResponse(
-                uuid=append_entries.uuid, term=self.current_term, success=False
+                server_id=self.server_id,
+                uuid=append_entries.uuid,
+                term=self.current_term,
+                success=False,
             )
 
         self.reset_clock()
@@ -198,7 +213,10 @@ class RaftMachine:
         self.update_commit_index(append_entries.leader_commit, self.log.last_index)
 
         return AppendEntriesResponse(
-            uuid=append_entries.uuid, term=self.current_term, success=True
+            server_id=self.server_id,
+            uuid=append_entries.uuid,
+            term=self.current_term,
+            success=True,
         )
 
     def handle_append_entries_response(
@@ -208,15 +226,20 @@ class RaftMachine:
         if not self.is_leader:
             return
 
-        # TODO: Handle counting replies to get a majority
-        pass
+        if append_entries_response.uuid is None:
+            return
+
+        if not append_entries_response.success:
+            # TODO: What do do here? I think we decrement the next_index
+            return
+
+        self.next_index[append_entries_response.server_id] += 1
+        self.match_index[append_entries_response.server_id] += 1
 
     def increment_clock(self) -> None:
         assert (
             self.clock < self.election_timeout or self.is_leader
         ), "Error, Clock is already past the election timeout"
-
-        print(self)
 
         self.clock += 1
 
@@ -224,6 +247,7 @@ class RaftMachine:
             return
 
         if self.clock >= self.election_timeout:
+            print(f"Server {self.server_id} timed out, sending vote")
             self.attempt_candidacy()
 
     def attempt_candidacy(self) -> None:
@@ -245,11 +269,10 @@ class RaftMachine:
             for id in range(self.num_servers)
             if id != self.server_id
         }
-        self.match_index = {
-            id: 0 for id in range(self.num_servers) if id != self.server_id
-        }
-
+        self.match_index = defaultdict(lambda: 0)
         self.reset_clock()
+
+        print(f"Server {self.server_id} became LEADER")
 
     @property
     def num_votes_received(self) -> int:
@@ -270,6 +293,14 @@ class RaftMachine:
     @property
     def is_candidate(self) -> bool:
         return self.state == MachineState.CANDIDATE
+
+    @property
+    def is_hearbeat_tick(self) -> bool:
+        return self.clock % self.heartbeat_freq == 0
+
+    @property
+    def is_election_start(self) -> bool:
+        return self.clock == 0 and self.is_candidate
 
     def add_vote(self, server_id: int) -> None:
         self.votes[server_id] = True

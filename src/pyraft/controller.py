@@ -44,7 +44,7 @@ class Controller:
         self.server = server
         self.machine = machine
         self.queue: queue.Queue[Action] = queue.Queue()
-        self.time_dilation = 0.5
+        self.time_dilation = 1
         self.active = True
         self.num_append_entry_responses: dict[str, int] = {}
 
@@ -169,20 +169,25 @@ class Controller:
                     b"append_entries " + promotion_message.model_dump_json().encode()
                 )
             case ActionKind.TICK:
-                tick_message = self.machine.handle_tick()
-                if tick_message is None:
+                tick_return = self.machine.handle_tick()
+                if tick_return is None:
                     return
 
-                encoded = tick_message.model_dump_json().encode()
-
-                if isinstance(tick_message, AppendEntries):
-                    self.server.send_to_all_nodes(b"append_entries " + encoded)
+                if isinstance(tick_return, dict):
+                    for server, append_entries in tick_return.items():
+                        assert isinstance(append_entries, AppendEntries)
+                        message = (
+                            b"append_entries "
+                            + append_entries.model_dump_json().encode()
+                        )
+                        self.server.send_to_single_node(server, message)
                     return
-                elif isinstance(tick_message, RequestVote):
+                elif isinstance(tick_return, RequestVote):
+                    encoded = tick_return.model_dump_json().encode()
                     self.server.send_to_all_nodes(b"request_vote " + encoded)
                     return
 
-                raise ValueError(f"Unexpected message type: {type(tick_message)}")
+                raise ValueError(f"Unexpected message type: {type(tick_return)}")
             case ActionKind.MESSAGE:
                 if not self.machine.is_leader:
                     # TODO: Send a response containing the leader id

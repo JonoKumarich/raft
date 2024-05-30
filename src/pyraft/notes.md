@@ -7,3 +7,12 @@ When the tally passes the majority, it will set the value to commited?
 # Bugs:
 
 - Send message, stop leader, and send message to new elected leader crashed the program
+
+# Questions:
+
+Sending a message:
+- What happens when a single message gets dropped: Do we resend that message to the server even when we have a majority?
+    - Yes we keep sending until we get a response
+
+
+- SO: We ke
