@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
 
-from pyraft.log import AppendEntriedFailedError, RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -16,7 +15,6 @@ from pyraft.message import (
 )
 from pyraft.server import Server, SocketServer
 from pyraft.state import MachineState, RaftMachine
-from pyraft.storage import DataStore, LocalDataStore
 
 
 class ActionKind(Enum):

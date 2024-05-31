@@ -59,7 +59,7 @@ class LogEntry:
 
 
 # Errors we should have, Terms don't match. Log not caught up
-class AppendEntriedFailedError(Exception):
+class AppendEntriesFailedError(Exception):
     pass
 
 
@@ -83,6 +83,11 @@ class RaftLog:
     def append_entry(
         self, prev_log_index: int, prev_log_term: int, entries: list[LogEntry]
     ) -> None:
+        # TODO: SHould this be possible?
+        assert (
+            prev_log_index <= self.last_index
+        ), "something went wrong, prev_log_index should be lower than the list length"
+
         if len(entries) == 0:
             return
 
@@ -93,22 +98,40 @@ class RaftLog:
         prev_log_entry = self.get(prev_log_index)
 
         if prev_log_entry is None:
-            raise AppendEntriedFailedError("Previous entry in the log is None")
+            raise AppendEntriesFailedError("Previous entry in the log is None")
 
         if prev_log_term != prev_log_entry.term:
-            raise AppendEntriedFailedError(
+            raise AppendEntriesFailedError(
                 "Term of previous entry in the log is different from the append request"
             )
 
         # Rule 3: If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
+        entries_to_extend = []
         for i, entry in enumerate(entries, start=1):
+            if entry.term < self.last_term:
+                raise AppendEntriesFailedError(
+                    "Can't insert a lower term than the last entry"
+                )
+
             new_item_index = prev_log_index + i
-            existing_entry = self.get(new_item_index)
-            if existing_entry is not None and existing_entry.term != entry.term:
+
+            try:
+                existing_entry = self.get(new_item_index)
+            except IndexError:
+                assert new_item_index > self.last_index, "This should not be possible"
+                # Entry does not exist in log
+                entries_to_extend.append(entry)
+                continue
+
+            if existing_entry.term != entry.term:
                 self.delete_existing_from(new_item_index)
+                # Can now add all other entries, as rest of list is now empty
+                entries_to_extend.extend(entries[i - 1 :])
                 break
 
-        self._items.extend(entries)
+            # If we arrive here, it means that the entry already exists, don't re-add it
+
+        self._items.extend(entries_to_extend)
 
     @property
     def last_term(self) -> int:
@@ -123,17 +146,8 @@ class RaftLog:
 
     @property
     def last_item(self) -> LogEntry:
-
-        item = self.get(self.last_index)
-        assert item is not None, "Can't get previous item in log as it is empty"
-        return item
-
-    @property
-    def max_term(self) -> int:
-        if len(self._items) == 0:
-            return -1
-
-        return max([item.term for item in self._items])
+        return self.get(self.last_index)
 
     def delete_existing_from(self, index: int) -> None:
+        assert 0 < index <= self.last_index
         self._items = self._items[: index - 1]

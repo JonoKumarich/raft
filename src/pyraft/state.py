@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from pyraft.log import LogEntry, MissingEntryError, RaftLog
+from pyraft.log import AppendEntriesFailedError, LogEntry, RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -199,11 +199,19 @@ class RaftMachine:
         if self.is_leader and append_entries.term > self.current_term:
             self.demote_to_follower()
 
-        self.log.append_entry(
-            prev_log_index=append_entries.prev_log_index,
-            prev_log_term=append_entries.prev_log_term,
-            entries=append_entries.entries,
-        )
+        try:
+            self.log.append_entry(
+                prev_log_index=append_entries.prev_log_index,
+                prev_log_term=append_entries.prev_log_term,
+                entries=append_entries.entries,
+            )
+        except AppendEntriesFailedError:
+            return AppendEntriesResponse(
+                server_id=self.server_id,
+                uuid=append_entries.uuid,
+                term=self.current_term,
+                success=False,
+            )
 
         if len(append_entries.entries) > 0:
             print(
