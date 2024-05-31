@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from pyraft.log import LogEntry, RaftLog
+from pyraft.log import LogEntry, MissingEntryError, RaftLog
 from pyraft.message import (
     AppendEntries,
     AppendEntriesResponse,
@@ -174,11 +174,11 @@ class RaftMachine:
             ), "Non-zero term with zero log index"
             return True
 
-        last_entry = self.log.get(append_entries.prev_log_index)
-        if last_entry is None:
-            return False
-
-        return last_entry.term == append_entries.prev_log_term
+        try:
+            last_entry = self.log.get(append_entries.prev_log_index)
+            return last_entry.term == append_entries.prev_log_term
+        except IndexError:
+            return append_entries.prev_log_index == 0
 
     def handle_append_entries(
         self, append_entries: AppendEntries

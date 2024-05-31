@@ -1,6 +1,14 @@
 from dataclasses import dataclass
+from decimal import Inexact
 from enum import Enum, auto
 from typing import Any, Optional, Self
+
+
+class MessageArgSizeError(Exception):
+    def __init__(self, message: bytes, num_required_args: int) -> None:
+        super().__init__(
+            f"Number of items in message incorrect. Expected {num_required_args}, received {len(message.split())}. ({message})"
+        )
 
 
 class Instruction(Enum):
@@ -36,8 +44,11 @@ class LogEntry:
 
         match instruction:
             case Instruction.SET:
-                key, value = value.split(maxsplit=1)
-                command = Command(instruction, key.decode(), int(value))
+                try:
+                    key, value = value.split(maxsplit=1)
+                    command = Command(instruction, key.decode(), int(value))
+                except ValueError as e:
+                    raise MessageArgSizeError(input, 3)
             case _:
                 raise NotImplementedError
 
@@ -59,12 +70,15 @@ class RaftLog:
     def __repr__(self) -> str:
         return str(self._items)
 
-    def get(self, index: int) -> Optional[LogEntry]:
-
+    def get(self, index: int) -> LogEntry:
         if index <= 0:
-            raise IndexError("Only indexes > 0 supported")
+            raise IndexError("Can't index <= 0, this is a one indexed log")
 
         return self._items[index - 1]
+
+    def append(self, item: LogEntry) -> None:
+        assert isinstance(item, LogEntry)
+        self._items.append(item)
 
     def append_entry(
         self, prev_log_index: int, prev_log_term: int, entries: list[LogEntry]
