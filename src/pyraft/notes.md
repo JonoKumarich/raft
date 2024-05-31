@@ -15,4 +15,4 @@ Sending a message:
     - Yes we keep sending until we get a response
 
 
-- SO: We ke
+- SO: We send everything past the match index for each sertver

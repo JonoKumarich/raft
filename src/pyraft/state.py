@@ -38,7 +38,7 @@ class RaftMachine:
         self.election_timeout = create_timeout()
         self.state = MachineState.FOLLOWER
         self.commit_index = 0
-        self.last_applied = 0
+        self.last_applied = 0  # TODO: If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
         self.votes = {id: False for id in range(num_servers)}
         self.log = RaftLog()
         self.datastore = datastore
@@ -103,11 +103,11 @@ class RaftMachine:
         return entries_to_send
 
     def _request_vote_valid(self, request_vote: RequestVote) -> bool:
-        if request_vote.term != self.current_term:
-            return request_vote.term > self.current_term
+        if request_vote.term < self.current_term:
+            return False
 
-        voted_for_other_candidate = (
-            self.voted_for is not None and self.voted_for != request_vote.candidate_id
+        voted_for_other_candidate = not (
+            request_vote.candidate_id == self.voted_for or self.voted_for is None
         )
         if voted_for_other_candidate:
             return False
@@ -127,7 +127,8 @@ class RaftMachine:
                 server_id=self.server_id, term=self.current_term, vote_granted=False
             )
 
-        self.update_term(request_vote.term)
+        if request_vote.term != self.current_term:
+            self.update_term(request_vote.term)
 
         self.voted_for = request_vote.candidate_id
         self.reset_clock()
@@ -272,11 +273,7 @@ class RaftMachine:
     def convert_to_leader(self) -> None:
         self.state = MachineState.LEADER
 
-        self.next_index = {
-            id: self.last_applied
-            for id in range(self.num_servers)
-            if id != self.server_id
-        }
+        self.next_index = defaultdict(lambda: self.log.last_index + 1)
         self.match_index = defaultdict(lambda: 0)
         self.reset_clock()
 
@@ -322,9 +319,8 @@ class RaftMachine:
         self.clock = 0
 
     def update_term(self, term: int) -> None:
-        assert term >= self.current_term, "Can't lower the value of a term"
-        if self.current_term == term:
-            return
+        if term <= self.current_term:
+            raise ValueError("New term must be greater or equal to current term")
 
         self.current_term = term
         self.voted_for = None
@@ -338,8 +334,8 @@ class RaftMachine:
         self.state = MachineState.FOLLOWER
         self.reset_clock()
 
-    def update_commit_index(self, leader_commit: int, new_log_length: int) -> None:
-        if self.commit_index <= leader_commit:
+    def update_commit_index(self, leader_commit: int, new_log_index: int) -> None:
+        if self.commit_index >= leader_commit:
             return
 
-        self.commit_index = min(leader_commit, new_log_length)
+        self.commit_index = min(leader_commit, new_log_index)
