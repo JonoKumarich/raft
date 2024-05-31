@@ -39,17 +39,12 @@ class Controller:
         self,
         server: Server,
         machine: RaftMachine,
-        networked: bool = True,
     ) -> None:
         self.server = server
         self.machine = machine
         self.queue: queue.Queue[Action] = queue.Queue()
-        self.time_dilation = 1
+        self.time_dilation = 0.5
         self.active = True
-        self.num_append_entry_responses: dict[str, int] = {}
-
-        # This handles the actions via a queue instead to avoid race conditions. It should be turned off for testing purposes only
-        self.networked = networked
 
     def run(self) -> None:
         threading.Thread(target=self.clock, daemon=True).start()
@@ -114,10 +109,7 @@ class Controller:
         if not self.active:
             return action
 
-        if self.networked:
-            self.queue.put(action)
-        else:
-            self._handle_item(action)
+        self.queue.put(action)
 
         return action
 
@@ -132,10 +124,7 @@ class Controller:
 
     def tick(self) -> None:
         action = Action(ActionKind.TICK, None)
-        if self.networked:
-            self.queue.put(action)
-        else:
-            self._handle_item(action)
+        self.queue.put(action)
 
     def _handle_item(self, action: Action) -> None:
         if not self.active:
