@@ -76,6 +76,12 @@ class RaftLog:
 
         return self._items[index - 1]
 
+    def get_logs_from(self, index: int) -> list[LogEntry]:
+        if index <= 0:
+            raise IndexError("Can't index <= 0, this is a one indexed log")
+
+        return self._items[index - 1 :]
+
     def append(self, item: LogEntry) -> None:
         assert isinstance(item, LogEntry)
         self._items.append(item)

@@ -59,7 +59,25 @@ class RaftMachine:
         self.datastore.store_vote(self.voted_for)
         self.datastore.store_log(self.log)
 
-    def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntriesResponse]]:
+    def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntries]]:
+
+        # Upon election: send initial empty AppendEntries RPCs (heartbeat) to each server; repeat during idle periods to prevent election timeouts (§5.2)
+        if self.is_newly_elected:
+            self.increment_clock()
+            return {
+                id: AppendEntries(
+                    uuid=None,
+                    term=self.current_term,
+                    leader_id=self.server_id,
+                    prev_log_index=self.log.last_index,
+                    prev_log_term=self.log.last_term,
+                    entries=[],
+                    leader_commit=self.commit_index,
+                )
+                for id in range(self.num_servers)
+                if id != self.server_id
+            }
+
         self.increment_clock()
 
         if self.is_election_start:
@@ -70,35 +88,40 @@ class RaftMachine:
                 last_log_term=self.log.last_term,
             )
 
-        if not (self.is_leader and self.is_hearbeat_tick):
-            return None
+        if not self.is_leader:
+            return
 
         logs_to_process: list[LogEntry] = []
-        while not self.pending_entries.empty():
-            entry = self.pending_entries.get()
-            logs_to_process.append(LogEntry.from_bytes(entry, self.current_term))
+        if self.is_hearbeat_tick:
+            while not self.pending_entries.empty():
+                entry = self.pending_entries.get()
+                logs_to_process.append(LogEntry.from_bytes(entry, self.current_term))
 
-        self.log.append_entry(self.log.last_index, self.log.last_term, logs_to_process)
+            # If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
+            self.log.append_entry(
+                self.log.last_index, self.log.last_term, logs_to_process
+            )
 
         entries_to_send = {}
         for server_id in range(self.num_servers):
             if server_id == self.server_id:
                 continue
 
-            if self.match_index[server_id] != self.commit_index:
-                self.match_index[server_id] -= 1
-                assert self.match_index[server_id] >= 0
-                logs_to_process.insert(0, self.log.last_item)
+            # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
+            has_log_offset = self.log.last_index >= self.next_index[server_id]
+            if has_log_offset or self.is_hearbeat_tick:
+                additional_logs = self.log.get_logs_from(self.next_index[server_id])
+                entries_for_server = additional_logs + logs_to_process
 
-            entries_to_send[server_id] = AppendEntries(
-                uuid=None if len(logs_to_process) == 0 else str(uuid.uuid4()),
-                term=self.current_term,
-                leader_id=self.server_id,
-                prev_log_index=self.log.last_index,
-                prev_log_term=self.log.last_term,
-                entries=logs_to_process,
-                leader_commit=self.commit_index,
-            )
+                entries_to_send[server_id] = AppendEntries(
+                    uuid=None if len(logs_to_process) == 0 else str(uuid.uuid4()),
+                    term=self.current_term,
+                    leader_id=self.server_id,
+                    prev_log_index=self.log.last_index,
+                    prev_log_term=self.log.last_term,
+                    entries=entries_for_server,
+                    leader_commit=self.commit_index,
+                )
 
         return entries_to_send
 
@@ -143,6 +166,7 @@ class RaftMachine:
     def handle_request_vote_response(
         self, request_vote_response: RequestVoteResponse
     ) -> Optional[AppendEntries]:
+
         # Skip remaining votes responses after obtaining a majority
         if self.is_leader:
             return
@@ -238,10 +262,12 @@ class RaftMachine:
         if append_entries_response.uuid is None:
             return
 
+        # • If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
         if not append_entries_response.success:
-            # TODO: What do do here? I think we decrement the next_index
+            self.next_index[append_entries_response.server_id] -= 1
             return
 
+        # • If successful: update nextIndex and matchIndex for follower (§5.3)
         self.next_index[append_entries_response.server_id] += 1
         self.match_index[append_entries_response.server_id] += 1
 
@@ -306,6 +332,10 @@ class RaftMachine:
     @property
     def is_election_start(self) -> bool:
         return self.clock == 0 and self.is_candidate
+
+    @property
+    def is_newly_elected(self) -> bool:
+        return self.clock == 0 and self.is_leader
 
     def add_vote(self, server_id: int) -> None:
         self.votes[server_id] = True

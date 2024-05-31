@@ -35,6 +35,16 @@ def test_one_indexed_log_gets_correctly():
     assert b.command.value == 3
 
 
+def test_one_indexed_log_sliced_correctly():
+    log = RaftLog()
+    log.append(LogEntry(1, Command(Instruction.SET, "foo", 1)))
+    log.append(LogEntry(1, Command(Instruction.SET, "foo", 2)))
+    log.append(LogEntry(1, Command(Instruction.SET, "foo", 3)))
+
+    res = log.get_logs_from(2)
+    assert res == [log.get(2), log.get(3)]
+
+
 def test_log_indexed_out_of_bounds_fails():
     log = RaftLog()
 
@@ -122,6 +132,13 @@ def test_append_entry_empty_log():
     assert log.last_index == 2
     assert log.last_term == 2
     assert log.last_item == c2
+
+
+def test_append_entry_no_entries():
+    log = RaftLog()
+    log.append_entry(0, 0, [])
+    assert log.last_index == 0
+    assert log.last_term == 0
 
 
 def test_append_entry_with_mismatched_log_terms_fail():
