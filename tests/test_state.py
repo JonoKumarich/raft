@@ -350,16 +350,6 @@ def test_handle_tick_not_leader_doesnt_trigger_heartbeat():
     assert machine.handle_tick() is None
 
 
-def test_handle_tick_elected_leader_triggers_append_entries():
-    machine = RaftMachine(0, 3)
-    machine.election_timeout = 1000
-    machine.heartbeat_freq = 1000
-
-    assert machine.handle_tick() is None
-    machine.convert_to_leader()
-    assert isinstance(machine.handle_tick(), dict)
-
-
 def test_handle_tick_heartbeat_empty_queue():
     machine = RaftMachine(0, 3)
     machine.convert_to_leader()
@@ -378,29 +368,74 @@ def test_handle_tick_heartbeat_empty_queue():
         assert key != machine.server_id
 
 
-# def test_handle_tick_heartbeat_adds_to_log():
+def test_handle_tick_heartbeat_adds_to_log():
+    machine = RaftMachine(0, 3)
+    machine.update_term(2)
+    machine.convert_to_leader()
+    machine.election_timeout = 1000
+    machine.heartbeat_freq = 2
+
+    machine.pending_entries.put(b"set foo 1")
+    machine.pending_entries.put(b"set bar 2")
+
+    machine.handle_tick()
+    responses = machine.handle_tick()
+    assert isinstance(responses, dict)
+    for res in responses.values():
+        assert isinstance(res, AppendEntries)
+        assert res.entries == [
+            LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1)),
+            LogEntry(machine.current_term, Command(Instruction.SET, "bar", 2)),
+        ]
+        assert res.uuid is not None
+        assert res.prev_log_term == machine.log.last_term
+        assert res.prev_log_index == machine.log.last_index
+
+
+# def test_handle_tick_heartbeat_handles_out_of_date_match_index():
 #     machine = RaftMachine(0, 3)
-#     machine.update_term(2)
+#     machine.update_term(1)
+#     machine.log.append_entry(
+#         machine.log.last_index,
+#         machine.log.last_term,
+#         [
+#             LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1)),
+#             LogEntry(machine.current_term, Command(Instruction.SET, "bar", 1)),
+#         ],
+#     )
 #     machine.convert_to_leader()
 #     machine.election_timeout = 1000
-#     machine.heartbeat_freq = 2
+#     machine.heartbeat_freq = 1000
 #
-#     machine.pending_entries.put(b"set foo 1")
+#     # assert machine.match_index[2] ==
+#
+#     machine.pending_entries.put(b"set foo 2")
 #     machine.pending_entries.put(b"set bar 2")
-#
-#     machine.handle_tick()
-#     responses = machine.handle_tick()
-#     assert isinstance(responses, dict)
-#     for res in responses.values():
-#         assert isinstance(res, AppendEntries)
-#         assert res.entries == [
-#             LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1)),
-#             LogEntry(machine.current_term, Command(Instruction.SET, "bar", 2)),
-#         ]
-#         assert res.uuid is not None
-#         assert res.prev_log_term == machine.log.last_term
-#         assert res.prev_log_index == machine.log.last_index
-#
 
 
-def test_handle_tick_heartbeat_handles_out_of_date_match_index(): ...
+def test_leader_election_sends_append_entries():
+    machine = RaftMachine(0, 5)
+    machine.attempt_candidacy()
+
+    assert (
+        machine.handle_request_vote_response(
+            RequestVoteResponse(
+                server_id=1, term=machine.current_term, vote_granted=True
+            )
+        )
+        is None
+    )
+
+    assert isinstance(
+        machine.handle_request_vote_response(
+            RequestVoteResponse(
+                server_id=2, term=machine.current_term, vote_granted=True
+            )
+        ),
+        AppendEntries,
+    )
+
+    machine.election_timeout = 1000
+
+    assert machine.is_leader
+    assert machine.handle_tick() is None

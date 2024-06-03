@@ -46,8 +46,8 @@ class RaftMachine:
         self.pending_entries: queue.Queue[bytes] = queue.Queue()
 
         # Leader Volatile state
-        self.next_index: dict[int, int] = defaultdict(lambda: self.log.last_index + 1)
-        self.match_index: dict[int, int] = defaultdict(lambda: 0)
+        self.next_index = defaultdict(lambda: self.log.last_index + 1)
+        self.match_index = defaultdict(lambda: 0)
 
         assert num_servers % 2 != 0, "Only supporting an odd number of servers for now"
 
@@ -60,23 +60,6 @@ class RaftMachine:
         self.datastore.store_log(self.log)
 
     def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntries]]:
-
-        # Upon election: send initial empty AppendEntries RPCs (heartbeat) to each server; repeat during idle periods to prevent election timeouts (§5.2)
-        if self.is_newly_elected:
-            self.increment_clock()
-            return {
-                id: AppendEntries(
-                    uuid=None,
-                    term=self.current_term,
-                    leader_id=self.server_id,
-                    prev_log_index=self.log.last_index,
-                    prev_log_term=self.log.last_term,
-                    entries=[],
-                    leader_commit=self.commit_index,
-                )
-                for id in range(self.num_servers)
-                if id != self.server_id
-            }
 
         self.increment_clock()
 
@@ -91,39 +74,42 @@ class RaftMachine:
         if not self.is_leader:
             return
 
-        logs_to_process: list[LogEntry] = []
         if self.is_hearbeat_tick:
             while not self.pending_entries.empty():
                 entry = self.pending_entries.get()
-                logs_to_process.append(LogEntry.from_bytes(entry, self.current_term))
 
-            # If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
-            self.log.append_entry(
-                self.log.last_index, self.log.last_term, logs_to_process
-            )
+                # If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
+                self.log.append_entry(
+                    self.log.last_index,
+                    self.log.last_term,
+                    [LogEntry.from_bytes(entry, self.current_term)],
+                )
 
-        entries_to_send = {}
+        append_entries_to_send = {}
         for server_id in range(self.num_servers):
             if server_id == self.server_id:
                 continue
 
             # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-            has_log_offset = self.log.last_index >= self.next_index[server_id]
+            has_log_offset = (self.log.last_index) >= self.next_index[server_id]
             if has_log_offset or self.is_hearbeat_tick:
-                additional_logs = self.log.get_logs_from(self.next_index[server_id])
-                entries_for_server = additional_logs + logs_to_process
+                # Note, do not include new logs twice here
+                logs_to_send = self.log.get_logs_from(self.next_index[server_id])
 
-                entries_to_send[server_id] = AppendEntries(
-                    uuid=None if len(logs_to_process) == 0 else str(uuid.uuid4()),
+                append_entries_to_send[server_id] = AppendEntries(
+                    uuid=None if len(logs_to_send) == 0 else str(uuid.uuid4()),
                     term=self.current_term,
                     leader_id=self.server_id,
                     prev_log_index=self.log.last_index,
                     prev_log_term=self.log.last_term,
-                    entries=entries_for_server,
+                    entries=logs_to_send,
                     leader_commit=self.commit_index,
                 )
 
-        return entries_to_send
+        if len(append_entries_to_send) == 0 and not self.is_hearbeat_tick:
+            return None
+
+        return append_entries_to_send
 
     def _request_vote_valid(self, request_vote: RequestVote) -> bool:
         if request_vote.term < self.current_term:
@@ -332,10 +318,6 @@ class RaftMachine:
     @property
     def is_election_start(self) -> bool:
         return self.clock == 0 and self.is_candidate
-
-    @property
-    def is_newly_elected(self) -> bool:
-        return self.clock == 0 and self.is_leader
 
     def add_vote(self, server_id: int) -> None:
         self.votes[server_id] = True
