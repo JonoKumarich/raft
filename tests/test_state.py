@@ -368,28 +368,30 @@ def test_handle_tick_heartbeat_empty_queue():
         assert key != machine.server_id
 
 
-def test_handle_tick_heartbeat_adds_to_log():
+def test_handle_tick_with_pending_adds_to_log_and_sends_response():
     machine = RaftMachine(0, 3)
     machine.update_term(2)
     machine.convert_to_leader()
     machine.election_timeout = 1000
-    machine.heartbeat_freq = 2
+    machine.heartbeat_freq = 1000
 
     machine.pending_entries.put(b"set foo 1")
-    machine.pending_entries.put(b"set bar 2")
 
-    machine.handle_tick()
     responses = machine.handle_tick()
+    assert machine.log.last_index == 1
+    assert machine.log.last_term == 2
+    assert machine.log.last_item == LogEntry(2, Command(Instruction.SET, "foo", 1))
+
     assert isinstance(responses, dict)
     for res in responses.values():
         assert isinstance(res, AppendEntries)
         assert res.entries == [
             LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1)),
-            LogEntry(machine.current_term, Command(Instruction.SET, "bar", 2)),
         ]
         assert res.uuid is not None
-        assert res.prev_log_term == machine.log.last_term
-        assert res.prev_log_index == machine.log.last_index
+        assert res.prev_log_term == 0
+        assert res.prev_log_index == 0
+        assert res.term == 2
 
 
 def test_handle_tick_heartbeat_handles_out_of_date_match_index():
@@ -416,7 +418,6 @@ def test_handle_tick_heartbeat_handles_out_of_date_match_index():
     machine.pending_entries.put(b"set bar 2")
 
     res = machine.handle_tick()
-    # Issue: Append entries to send is null
     assert res is not None and not isinstance(res, RequestVote)
 
     assert len(res[1].entries) == 2
@@ -451,3 +452,21 @@ def test_leader_election_sends_append_entries():
 
     assert machine.is_leader
     assert machine.handle_tick() is None
+
+
+#
+# def test_handle_single_append_entry_succeeds():
+#     machine = RaftMachine(1, 3)
+#
+#     # DOes it send this or 1, 1 in real example?
+#     ae = AppendEntries(
+#         uuid="abc",
+#         term=1,
+#         leader_id=0,
+#         prev_log_index=0,
+#         prev_log_term=0,
+#         entries=[LogEntry(1, Command(Instruction.SET, "foo", 1))],
+#         leader_commit=0,
+#     )
+#
+#     machine.handle_append_entries()

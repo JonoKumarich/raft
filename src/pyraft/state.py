@@ -64,13 +64,15 @@ class RaftMachine:
     def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntries]]:
 
         self.increment_clock()
+        prev_log_index = self.log.last_index
+        prev_log_term = self.log.last_term
 
         if self.is_election_start:
             return RequestVote(
                 term=self.current_term,
                 candidate_id=self.server_id,
-                last_log_index=self.log.last_index,
-                last_log_term=self.log.last_term,
+                last_log_index=prev_log_index,
+                last_log_term=prev_log_term,
             )
 
         if not self.is_leader:
@@ -92,20 +94,19 @@ class RaftMachine:
             if server_id == self.server_id:
                 continue
 
+            # TODO: We need to wait for a response rather than just spam all pending entries ASAP
+
             # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
             has_log_offset = (self.log.last_index) >= self.next_index[server_id]
             if has_log_offset or self.is_hearbeat_tick:
-                print(
-                    f"{self.log._items=} {self.next_index[server_id]=} {self.match_index[server_id]=} {server_id=}"
-                )
                 logs_to_send = self.log.get_logs_from(self.next_index[server_id])
 
                 append_entries_to_send[server_id] = AppendEntries(
                     uuid=None if len(logs_to_send) == 0 else str(uuid.uuid4()),
                     term=self.current_term,
                     leader_id=self.server_id,
-                    prev_log_index=self.log.last_index,
-                    prev_log_term=self.log.last_term,
+                    prev_log_index=prev_log_index,
+                    prev_log_term=prev_log_term,
                     entries=logs_to_send,
                     leader_commit=self.commit_index,
                 )
