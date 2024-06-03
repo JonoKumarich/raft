@@ -46,8 +46,10 @@ class RaftMachine:
         self.pending_entries: queue.Queue[bytes] = queue.Queue()
 
         # Leader Volatile state
-        self.next_index = defaultdict(lambda: self.log.last_index + 1)
-        self.match_index = defaultdict(lambda: 0)
+        self.next_index = {
+            id: self.log.last_index + 1 for id in range(num_servers) if id != server_id
+        }
+        self.match_index = {id: 0 for id in range(num_servers) if id != server_id}
 
         assert num_servers % 2 != 0, "Only supporting an odd number of servers for now"
 
@@ -74,16 +76,16 @@ class RaftMachine:
         if not self.is_leader:
             return
 
-        if self.is_hearbeat_tick:
-            while not self.pending_entries.empty():
-                entry = self.pending_entries.get()
+        # Append new entries to log
+        while not self.pending_entries.empty():
+            entry = self.pending_entries.get()
 
-                # If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
-                self.log.append_entry(
-                    self.log.last_index,
-                    self.log.last_term,
-                    [LogEntry.from_bytes(entry, self.current_term)],
-                )
+            # If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
+            self.log.append_entry(
+                self.log.last_index,
+                self.log.last_term,
+                [LogEntry.from_bytes(entry, self.current_term)],
+            )
 
         append_entries_to_send = {}
         for server_id in range(self.num_servers):
@@ -93,7 +95,9 @@ class RaftMachine:
             # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
             has_log_offset = (self.log.last_index) >= self.next_index[server_id]
             if has_log_offset or self.is_hearbeat_tick:
-                # Note, do not include new logs twice here
+                print(
+                    f"{self.log._items=} {self.next_index[server_id]=} {self.match_index[server_id]=} {server_id=}"
+                )
                 logs_to_send = self.log.get_logs_from(self.next_index[server_id])
 
                 append_entries_to_send[server_id] = AppendEntries(
@@ -285,8 +289,14 @@ class RaftMachine:
     def convert_to_leader(self) -> None:
         self.state = MachineState.LEADER
 
-        self.next_index = defaultdict(lambda: self.log.last_index + 1)
-        self.match_index = defaultdict(lambda: 0)
+        self.next_index = {
+            id: self.log.last_index + 1
+            for id in range(self.num_servers)
+            if id != self.server_id
+        }
+        self.match_index = {
+            id: 0 for id in range(self.num_servers) if id != self.server_id
+        }
         self.reset_clock()
 
         print(f"Server {self.server_id} became LEADER")
