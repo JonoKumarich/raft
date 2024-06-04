@@ -13,7 +13,9 @@ from pyraft.log import (
 def test_log_entry_from_bytes_set_message():
     message = b"set foo 1"
     entry = LogEntry.from_bytes(message, 1)
-    assert entry == LogEntry(1, Command(Instruction.SET, "foo", 1))
+    assert entry == LogEntry(
+        id=entry.id, term=1, command=Command(Instruction.SET, "foo", 1)
+    )
 
 
 def test_log_entry_from_bytes_set_message_two_args_fails():
@@ -28,6 +30,9 @@ def test_one_indexed_log_gets_correctly():
     log.append(LogEntry(1, Command(Instruction.SET, "foo", 2)))
     log.append(LogEntry(1, Command(Instruction.SET, "foo", 3)))
 
+    print(LogEntry(1, Command(Instruction.SET, "foo", 1)))
+    print(LogEntry(1, Command(Instruction.SET, "foo", 1)))
+    print(LogEntry(1, Command(Instruction.SET, "foo", 1)))
     assert (a := log.get(1)) is not None
     assert (b := log.get(3)) is not None
 

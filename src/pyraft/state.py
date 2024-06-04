@@ -78,6 +78,10 @@ class RaftMachine:
         if not self.is_leader:
             return
 
+        # NOTE: This only sends new entries on heartbeat ticks. However, I think in reality if nothing is pending response, new entries are sent immediately
+        if not self.is_hearbeat_tick:
+            return None
+
         # Append new entries to log
         while not self.pending_entries.empty():
             entry = self.pending_entries.get()
@@ -94,25 +98,19 @@ class RaftMachine:
             if server_id == self.server_id:
                 continue
 
-            # TODO: We need to wait for a response rather than just spam all pending entries ASAP
-
             # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-            has_log_offset = (self.log.last_index) >= self.next_index[server_id]
-            if has_log_offset or self.is_hearbeat_tick:
-                logs_to_send = self.log.get_logs_from(self.next_index[server_id])
+            logs_to_send = self.log.get_logs_from(self.next_index[server_id])
+            id = None if len(logs_to_send) == 0 else str(uuid.uuid4())
 
-                append_entries_to_send[server_id] = AppendEntries(
-                    uuid=None if len(logs_to_send) == 0 else str(uuid.uuid4()),
-                    term=self.current_term,
-                    leader_id=self.server_id,
-                    prev_log_index=prev_log_index,
-                    prev_log_term=prev_log_term,
-                    entries=logs_to_send,
-                    leader_commit=self.commit_index,
-                )
-
-        if len(append_entries_to_send) == 0 and not self.is_hearbeat_tick:
-            return None
+            append_entries_to_send[server_id] = AppendEntries(
+                uuid=id,
+                term=self.current_term,
+                leader_id=self.server_id,
+                prev_log_index=prev_log_index,
+                prev_log_term=prev_log_term,
+                entries=logs_to_send,
+                leader_commit=self.commit_index,
+            )
 
         return append_entries_to_send
 
@@ -248,6 +246,7 @@ class RaftMachine:
     def handle_append_entries_response(
         self, append_entries_response: AppendEntriesResponse
     ) -> None:
+        # NOTE: Delayed responses from the other servers could cause issues
 
         if not self.is_leader:
             return

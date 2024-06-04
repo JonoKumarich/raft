@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from decimal import Inexact
 from enum import Enum, auto
 from typing import Any, Optional, Self
@@ -36,6 +37,7 @@ class Command:
 class LogEntry:
     term: int
     command: Command
+    id: str = field(default_factory=lambda: str(uuid.uuid1()))
 
     @classmethod
     def from_bytes(cls, input: bytes, term: int) -> "LogEntry":
@@ -55,7 +57,7 @@ class LogEntry:
         return cls(term, command)
 
     def __repr__(self) -> str:
-        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value}"
+        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value} ({self.id=})"
 
 
 # Errors we should have, Terms don't match. Log not caught up
@@ -65,31 +67,35 @@ class AppendEntriesFailedError(Exception):
 
 class RaftLog:
     def __init__(self) -> None:
-        self._items: list[LogEntry] = []
+        self._items: dict[str, LogEntry] = {}
+
+    @property
+    def items(self) -> list[LogEntry]:
+        return list(self._items.values())
 
     def __repr__(self) -> str:
-        return str(self._items)
+        return str(self.items)
 
     def get(self, index: int) -> LogEntry:
         if index <= 0:
             raise IndexError("Can't index <= 0, this is a one indexed log")
 
-        return self._items[index - 1]
+        return self.items[index - 1]
 
     def get_logs_from(self, index: int) -> list[LogEntry]:
         if index <= 0:
             raise IndexError("Can't index <= 0, this is a one indexed log")
 
-        return self._items[index - 1 :]
+        return self.items[index - 1 :]
 
     def append(self, item: LogEntry) -> None:
         assert isinstance(item, LogEntry)
-        self._items.append(item)
+        self._items[item.id] = item
 
     def append_entry(
         self, prev_log_index: int, prev_log_term: int, entries: list[LogEntry]
     ) -> None:
-        # TODO: SHould this be possible?
+        # TODO: Should this be possible?
         assert (
             prev_log_index <= self.last_index
         ), "something went wrong, prev_log_index should be lower than the list length"
@@ -98,12 +104,13 @@ class RaftLog:
             return
 
         if prev_log_index == 0:
-            self._items.extend(entries)
+            for item in entries:
+                self.append(item)
             return
 
-        prev_log_entry = self.get(prev_log_index)
-
-        if prev_log_entry is None:
+        try:
+            prev_log_entry = self.get(prev_log_index)
+        except IndexError:
             raise AppendEntriesFailedError("Previous entry in the log is None")
 
         if prev_log_term != prev_log_entry.term:
@@ -137,14 +144,15 @@ class RaftLog:
 
             # If we arrive here, it means that the entry already exists, don't re-add it
 
-        self._items.extend(entries_to_extend)
+        for item in entries:
+            self.append(item)
 
     @property
     def last_term(self) -> int:
         if self.last_index == 0:
             return 0
 
-        return self._items[self.last_index - 1].term
+        return self.items[self.last_index - 1].term
 
     @property
     def last_index(self) -> int:
@@ -156,4 +164,4 @@ class RaftLog:
 
     def delete_existing_from(self, index: int) -> None:
         assert 0 < index <= self.last_index
-        self._items = self._items[: index - 1]
+        self._items = {item.id: item for item in self.items[: index - 1]}

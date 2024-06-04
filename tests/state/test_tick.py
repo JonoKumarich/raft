@@ -61,25 +61,31 @@ def test_handle_tick_with_pending_adds_to_log_and_sends_response():
     machine.update_term(2)
     machine.convert_to_leader()
     machine.election_timeout = 1000
-    machine.heartbeat_freq = 1000
+    machine.heartbeat_freq = 2
 
     machine.pending_entries.put(b"set foo 1")
 
-    responses = machine.handle_tick()
+    assert machine.handle_tick() is None
+    append_entries = machine.handle_tick()
     assert machine.log.last_index == 1
     assert machine.log.last_term == 2
-    assert machine.log.last_item == LogEntry(2, Command(Instruction.SET, "foo", 1))
 
-    assert isinstance(responses, dict)
-    for res in responses.values():
-        assert isinstance(res, AppendEntries)
-        assert res.entries == [
-            LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1)),
+    assert machine.log.last_item.command == Command(Instruction.SET, "foo", 1)
+
+    assert isinstance(append_entries, dict)
+    for key, entry in append_entries.items():
+        assert isinstance(entry, AppendEntries)
+        assert entry.entries == [
+            LogEntry(
+                machine.current_term,
+                Command(Instruction.SET, "foo", 1),
+                id=machine.log.last_item.id,
+            ),
         ]
-        assert res.uuid is not None
-        assert res.prev_log_term == 0
-        assert res.prev_log_index == 0
-        assert res.term == 2
+        assert entry.uuid is not None
+        assert entry.prev_log_term == 0
+        assert entry.prev_log_index == 0
+        assert entry.term == 2
 
 
 def test_handle_tick_heartbeat_handles_out_of_date_match_index():
@@ -95,7 +101,7 @@ def test_handle_tick_heartbeat_handles_out_of_date_match_index():
     )
     machine.convert_to_leader()
     machine.election_timeout = 1000
-    machine.heartbeat_freq = 1000
+    machine.heartbeat_freq = 2
 
     machine.next_index[1] = 3
     machine.next_index[2] = 2
@@ -105,6 +111,7 @@ def test_handle_tick_heartbeat_handles_out_of_date_match_index():
     machine.pending_entries.put(b"set foo 2")
     machine.pending_entries.put(b"set bar 2")
 
+    assert machine.handle_tick() is None
     res = machine.handle_tick()
     assert res is not None and not isinstance(res, RequestVote)
 
