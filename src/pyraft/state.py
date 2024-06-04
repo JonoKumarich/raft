@@ -263,6 +263,26 @@ class RaftMachine:
         self.next_index[append_entries_response.server_id] += 1
         self.match_index[append_entries_response.server_id] += 1
 
+        # • If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex = N (§5.3, §5.4).
+        while True:
+            next = self.commit_index + 1
+
+            if not self.commit_index_has_majority(next):
+                break
+
+            if self.log.get(next).term != self.current_term:
+                break
+
+            print(f"Commit index increased from {self.commit_index}->{next}")
+            self.commit_index = next
+
+    def commit_index_has_majority(self, commit_index: int) -> bool:
+        self_vote = 1
+        num_votes = (
+            sum(int(i >= commit_index) for i in self.match_index.values()) + self_vote
+        )
+        return num_votes > (self.num_servers / 2)
+
     def increment_clock(self) -> None:
         assert (
             self.clock < self.election_timeout or self.is_leader

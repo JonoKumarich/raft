@@ -73,7 +73,7 @@ def test_handle_tick_with_pending_adds_to_log_and_sends_response():
     assert machine.log.last_item.command == Command(Instruction.SET, "foo", 1)
 
     assert isinstance(append_entries, dict)
-    for key, entry in append_entries.items():
+    for _, entry in append_entries.items():
         assert isinstance(entry, AppendEntries)
         assert entry.entries == [
             LogEntry(

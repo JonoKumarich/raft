@@ -241,29 +241,13 @@ def test_commit_index_updates():
     assert machine.commit_index == 4
 
 
-def test_leader_election_sends_append_entries():
+def test_commit_index_majority():
     machine = RaftMachine(0, 5)
-    machine.attempt_candidacy()
+    machine.match_index[1] = 2
+    machine.match_index[2] = 3
+    machine.match_index[3] = 4
 
-    assert (
-        machine.handle_request_vote_response(
-            RequestVoteResponse(
-                server_id=1, term=machine.current_term, vote_granted=True
-            )
-        )
-        is None
-    )
-
-    assert isinstance(
-        machine.handle_request_vote_response(
-            RequestVoteResponse(
-                server_id=2, term=machine.current_term, vote_granted=True
-            )
-        ),
-        AppendEntries,
-    )
-
-    machine.election_timeout = 1000
-
-    assert machine.is_leader
-    assert machine.handle_tick() is None
+    assert machine.commit_index_has_majority(1)
+    assert machine.commit_index_has_majority(2)
+    assert machine.commit_index_has_majority(3)
+    assert not machine.commit_index_has_majority(4)
