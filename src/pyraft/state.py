@@ -1,8 +1,6 @@
 import queue
 import random
 import uuid
-from collections import defaultdict
-from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
@@ -76,7 +74,7 @@ class RaftMachine:
             )
 
         if not self.is_leader:
-            return
+            return None
 
         # NOTE: This only sends new entries on heartbeat ticks. However, I think in reality if nothing is pending response, new entries are sent immediately
         if not self.is_hearbeat_tick:
@@ -234,7 +232,9 @@ class RaftMachine:
                 f"Server {self.server_id} commit_index={self.commit_index} log={self.log._items}"
             )
 
-        self.update_commit_index(append_entries.leader_commit, self.log.last_index)
+        self.update_follower_commit_index(
+            append_entries.leader_commit, self.log.last_index
+        )
 
         return AppendEntriesResponse(
             server_id=self.server_id,
@@ -264,17 +264,7 @@ class RaftMachine:
         self.match_index[append_entries_response.server_id] += 1
 
         # • If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex = N (§5.3, §5.4).
-        while True:
-            next = self.commit_index + 1
-
-            if not self.commit_index_has_majority(next):
-                break
-
-            if self.log.get(next).term != self.current_term:
-                break
-
-            print(f"Commit index increased from {self.commit_index}->{next}")
-            self.commit_index = next
+        self.update_leader_commit_index()
 
     def commit_index_has_majority(self, commit_index: int) -> bool:
         self_vote = 1
@@ -378,8 +368,23 @@ class RaftMachine:
         self.state = MachineState.FOLLOWER
         self.reset_clock()
 
-    def update_commit_index(self, leader_commit: int, new_log_index: int) -> None:
+    def update_follower_commit_index(
+        self, leader_commit: int, new_log_index: int
+    ) -> None:
         if self.commit_index >= leader_commit:
             return
 
         self.commit_index = min(leader_commit, new_log_index)
+
+    def update_leader_commit_index(self):
+        while True:
+            next = self.commit_index + 1
+
+            if not self.commit_index_has_majority(next):
+                break
+
+            if self.log.get(next).term != self.current_term:
+                break
+
+            print(f"Commit index increased from {self.commit_index}->{next}")
+            self.commit_index = next

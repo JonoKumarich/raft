@@ -230,14 +230,14 @@ def test_term_update_demotes_leader():
     assert machine.is_follower
 
 
-def test_commit_index_updates():
+def test_follower_commit_index_updates():
     machine = RaftMachine(0, 3)
     assert machine.commit_index == 0
 
-    machine.update_commit_index(3, 4)
+    machine.update_follower_commit_index(3, 4)
     assert machine.commit_index == 3
 
-    machine.update_commit_index(5, 4)
+    machine.update_follower_commit_index(5, 4)
     assert machine.commit_index == 4
 
 
