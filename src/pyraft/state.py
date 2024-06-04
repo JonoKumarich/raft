@@ -248,6 +248,12 @@ class RaftMachine:
     ) -> None:
         # NOTE: Delayed responses from the other servers could cause issues
 
+        if append_entries_response.term > self.current_term:
+            assert (
+                not append_entries_response.success
+            ), "A succeeded AE should never have a greater term"
+            self.update_term(append_entries_response.term)
+
         if not self.is_leader:
             return
 

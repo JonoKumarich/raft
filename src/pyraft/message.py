@@ -20,7 +20,6 @@ class AppendEntriesResponse(BaseModel):
     uuid: str | None
     term: int
     success: bool
-    # TODO: Replication id
 
 
 class RequestVote(BaseModel):

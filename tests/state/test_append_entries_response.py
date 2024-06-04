@@ -24,6 +24,20 @@ def test_heartbeat_doesnt_change_state():
     assert match_index == m.match_index
 
 
+def test_response_is_newer_demotes_server():
+
+    m = RaftMachine(0, 3)
+    m.convert_to_leader()
+    m.update_term(1)
+    res = AppendEntriesResponse(
+        server_id=1, uuid=None, term=m.current_term + 1, success=False
+    )
+
+    m.handle_append_entries_response(res)
+    assert m.is_follower
+    assert m.current_term == 2
+
+
 def test_fail_decremrements_next_index(): ...
 
 
