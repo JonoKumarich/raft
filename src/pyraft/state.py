@@ -194,7 +194,7 @@ class RaftMachine:
             last_entry = self.log.get(append_entries.prev_log_index)
             return last_entry.term == append_entries.prev_log_term
         except IndexError:
-            return append_entries.prev_log_index == 0
+            return False
 
     def handle_append_entries(
         self, append_entries: AppendEntries
@@ -212,8 +212,10 @@ class RaftMachine:
         if self.is_candidate:
             self.demote_to_follower()
 
-        if self.is_leader and append_entries.term > self.current_term:
-            self.demote_to_follower()
+        if append_entries.term > self.current_term:
+            self.update_term(append_entries.term)
+            if self.is_leader:
+                self.demote_to_follower()
 
         try:
             self.log.append_entry(
