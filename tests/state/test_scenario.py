@@ -45,7 +45,7 @@ def test_basic_append_success_updates_commit_indexes():
 
 
 # Testing figure 8 of the paper
-def test_log_replication_figure8():
+def log_replication_figure_8_setup():
     s1 = RaftMachine(0, 5)
     s2 = RaftMachine(1, 5)
     s3 = RaftMachine(2, 5)
@@ -141,39 +141,70 @@ def test_log_replication_figure8():
     for machine in [s2, s3]:
         assert [item.term for item in machine.log.items] == [1, 2]
 
+    return s1, s2, s3, s4, s5
+
+
+def test_log_replication_figure_8_setup():
+    log_replication_figure_8_setup()
+
+
+def test_log_replication_figure_8_path_a():
+    s1, s2, s3, s4, s5 = log_replication_figure_8_setup()
     # d) (path A) S1 crashes, S5 could be elected leader (with votes from S2, S3, and S4) and overwrite the entry with its own entry from term 3.
-    s1a, s2a, s3a, s4a, s5a = s1, s2, s3, s4, s5
 
     # S5 back on line and new ae causes demotion
-    ae = s5a.handle_tick()
+    ae = s5.handle_tick()
     assert isinstance(ae, dict)
-    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
-    assert s5a.is_follower
-    s5a.election_timeout = 1
-    s5a.heartbeat_freq = 1
+    send_and_receive(s5, [s1, s2, s3, s4], ae)
+    assert s5.is_follower
+    s5.election_timeout = 1
+    s5.heartbeat_freq = 1
 
     # S5 times out and gets promoted to leader
-    rv = s5a.handle_tick()
+    rv = s5.handle_tick()
     assert isinstance(rv, RequestVote)
-    send_and_receive(s5a, [s1a, s2a, s3a, s4a], rv)
-    assert s5a.is_leader
+    send_and_receive(s5, [s1, s2, s3, s4], rv)
+    assert s5.is_leader
 
     # Heartbeat
-    ae = s5a.handle_tick()
+    ae = s5.handle_tick()
     assert isinstance(ae, dict)
-    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
+    send_and_receive(s5, [s1, s2, s3, s4], ae)
 
     # Should update all index 2 entries
-    ae = s5a.handle_tick()
+    ae = s5.handle_tick()
     assert isinstance(ae, dict)
-    print(ae[s1a.server_id])
-    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
+    send_and_receive(s5, [s1, s2, s3, s4], ae)
 
-    for machine in [s1a, s2a, s3a, s4a, s5a]:
+    for machine in [s1, s2, s3, s4, s5]:
         assert [item.term for item in machine.log.items] == [1, 3]
 
+
+def test_log_replication_figure_8_path_b():
+    s1, s2, s3, s4, s5 = log_replication_figure_8_setup()
     # e) (Path B) However, if S1 replicates an entry from its current term on a majority of the servers before crashing,
     # as in (e), then this entry is committed (S5 cannot win an election). At this point all preceding entries in the log are committed as well.
+
+    # S1 replicates to all other servers
+    ae = s1.handle_tick()
+    assert isinstance(ae, dict)
+    send_and_receive(s1, [s2, s3], ae)
+    for machine in [s1, s2, s3]:
+        assert [item.term for item in machine.log.items] == [1, 2, 4]
+
+    # S5 Comes back online and gets demoted
+    ae = s5.handle_tick()
+    assert isinstance(ae, dict)
+    send_and_receive(s5, [s1, s2, s3, s4], ae)
+    assert s5.is_follower
+    s5.election_timeout = 1
+    s5.heartbeat_freq = 1
+
+    # S5 cannot be elected leader
+    rv = s5.handle_tick()
+    assert isinstance(rv, RequestVote)
+    send_and_receive(s5, [s1, s2, s3, s4], rv)
+    assert s5.is_candidate
 
 
 def send_and_receive(
