@@ -119,3 +119,26 @@ def test_handle_tick_heartbeat_handles_out_of_date_match_index():
     assert len(res[2].entries) == 3
 
     assert res[2].entries[0] == l2
+
+
+def test_append_backfill_entries_correct_prev_values():
+    machine = RaftMachine(0, 3)
+    machine.update_term(1)
+    l1 = LogEntry(machine.current_term, Command(Instruction.SET, "foo", 1))
+    l2 = LogEntry(machine.current_term, Command(Instruction.SET, "bar", 1))
+    machine.log.append_entry(
+        machine.log.last_index,
+        machine.log.last_term,
+        [l1, l2],
+    )
+    machine.convert_to_leader()
+    machine.current_term = 2
+    machine.election_timeout = 1000
+    machine.heartbeat_freq = 1
+    machine.next_index[1] = 2
+
+    ae = machine.handle_tick()
+    assert isinstance(ae, dict)
+
+    assert ae[1].prev_log_term == 1
+    assert ae[1].prev_log_index == 1

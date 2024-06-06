@@ -52,7 +52,7 @@ def test_log_replication_figure8():
     s4 = RaftMachine(3, 5)
     s5 = RaftMachine(4, 5)
 
-    # (a) S1 is leader and partially replicates the log entry at index 2.
+    # a) S1 is leader and partially replicates the log entry at index 2.
     s1.update_term(1)
     s1.convert_to_leader()
     s1.election_timeout = 1000
@@ -80,7 +80,7 @@ def test_log_replication_figure8():
     for machine in [s3, s4, s5]:
         assert [item.term for item in machine.log.items] == [1]
 
-    #  In (b) S1 crashes; S5 is elected leader for term 3 with votes from S3, S4, and itself, and accepts a different entry at log index 2.
+    #  b) S1 crashes; S5 is elected leader for term 3 with votes from S3, S4, and itself, and accepts a different entry at log index 2.
     s5.election_timeout = 1
     s5.heartbeat_freq = 1
     rv = s5.handle_tick()
@@ -100,7 +100,7 @@ def test_log_replication_figure8():
 
     assert [item.term for item in s5.log.items] == [1, 3]
 
-    # In (c) S5 crashes; S1 restarts, is elected leader, and continues replication. At this point, the log entry from term 2
+    # c) S5 crashes; S1 restarts, is elected leader, and continues replication. At this point, the log entry from term 2
     # has been replicated on a majority of the servers, but it is not committed.
 
     s1.mock_reset()
@@ -132,22 +132,47 @@ def test_log_replication_figure8():
     assert isinstance(ae, dict)
     send_and_receive(s1, [s2, s3], ae)
 
-    # FIXME: When next index decrements and the leader resends a pst result, it still has the most current prev index and prev term, which doesnt exist on the follower making the AE fail
-    # What does the example do? sends the prev index and term at taht point in time
-
     s1.pending_entries.put(b"set foo 4")
     s1.handle_tick()
     assert [item.term for item in s1.log.items] == [1, 2, 4]
+    assert [item.term for item in s4.log.items] == [1]
+    assert [item.term for item in s5.log.items] == [1, 3]
 
     for machine in [s2, s3]:
         assert [item.term for item in machine.log.items] == [1, 2]
 
-    # TODO:  Two scenarios d / e
-    # TODO: Can add a tick_until_heartbeat and tick_until_election helper function?
+    # d) (path A) S1 crashes, S5 could be elected leader (with votes from S2, S3, and S4) and overwrite the entry with its own entry from term 3.
+    s1a, s2a, s3a, s4a, s5a = s1, s2, s3, s4, s5
 
-    # If S1 crashes as in (d), S5 could be elected leader (with votes from S2, S3, and S4) and overwrite the entry with its own entry from term 3.
+    # S5 back on line and new ae causes demotion
+    ae = s5a.handle_tick()
+    assert isinstance(ae, dict)
+    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
+    assert s5a.is_follower
+    s5a.election_timeout = 1
+    s5a.heartbeat_freq = 1
 
-    # However, if S1 replicates an entry from its current term on a majority of the servers before crashing,
+    # S5 times out and gets promoted to leader
+    rv = s5a.handle_tick()
+    assert isinstance(rv, RequestVote)
+    send_and_receive(s5a, [s1a, s2a, s3a, s4a], rv)
+    assert s5a.is_leader
+
+    # Heartbeat
+    ae = s5a.handle_tick()
+    assert isinstance(ae, dict)
+    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
+
+    # Should update all index 2 entries
+    ae = s5a.handle_tick()
+    assert isinstance(ae, dict)
+    print(ae[s1a.server_id])
+    send_and_receive(s5a, [s1a, s2a, s3a, s4a], ae)
+
+    for machine in [s1a, s2a, s3a, s4a, s5a]:
+        assert [item.term for item in machine.log.items] == [1, 3]
+
+    # e) (Path B) However, if S1 replicates an entry from its current term on a majority of the servers before crashing,
     # as in (e), then this entry is committed (S5 cannot win an election). At this point all preceding entries in the log are committed as well.
 
 

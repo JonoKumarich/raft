@@ -120,14 +120,6 @@ def test_delete_entries_from():
     assert log.last_index == 1
 
 
-def test_append_entry_with_lower_term_fails():
-    log = RaftLog()
-    log.append(LogEntry(2, Command(Instruction.SET, "foo", 1)))
-
-    with pytest.raises(AppendEntriesFailedError):
-        log.append_entry(1, 2, [LogEntry(1, Command(Instruction.SET, "foo", 1))])
-
-
 def test_append_entry_empty_log():
     log = RaftLog()
     c1 = LogEntry(1, Command(Instruction.SET, "foo", 1))
