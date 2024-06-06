@@ -49,7 +49,7 @@ class LogEntry:
                 try:
                     key, value = value.split(maxsplit=1)
                     command = Command(instruction, key.decode(), int(value))
-                except ValueError as e:
+                except ValueError:
                     raise MessageArgSizeError(input, 3)
             case _:
                 raise NotImplementedError
@@ -57,10 +57,9 @@ class LogEntry:
         return cls(term, command)
 
     def __repr__(self) -> str:
-        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value} ({self.id=})"
+        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value}"
 
 
-# Errors we should have, Terms don't match. Log not caught up
 class AppendEntriesFailedError(Exception):
     pass
 

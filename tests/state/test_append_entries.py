@@ -129,6 +129,25 @@ def test_validity_no_prev():
     assert machine._append_entries_valid(ae)
 
 
+def test_validity_heartbeat_no_entry_with_outdated_log_fails():
+    machine = RaftMachine(0, 3)
+    machine.update_term(2)
+
+    machine.log.append_entry(0, 0, [LogEntry(1, Command(Instruction.SET, "foo", 1))])
+
+    ae = AppendEntries(
+        uuid=None,
+        term=2,
+        leader_id=1,
+        prev_log_index=2,
+        prev_log_term=2,
+        entries=[],
+        leader_commit=0,
+    )
+
+    assert not machine._append_entries_valid(ae)
+
+
 def test_validity_mismatched_last_terms():
     ae = AppendEntries(
         uuid="abc",
@@ -185,3 +204,6 @@ def test_validity_matching_last_value():
     )
 
     assert machine._append_entries_valid(ae)
+
+
+# Server=1 Clock=0 Term=4 MachineState.FOLLOWER  [Term 1: set foo 1 (self.id='10c448e6-228e-11ef-b785-7e7d7d2ee38e'), Term 2: set bar 2 (self.id='10c44d14-228e-11ef-b785-7e7d7d2ee38e')] uuid='3f5742c9-f508-44f9-8389-971e33d3f796' term=4 leader_id=0 prev_log_index=2 prev_log_term=2 entries=[Term 4: set foo 4 (self.id='10c45340-228e-11ef-b785-7e7d7d2ee38e')] leader_commit=1

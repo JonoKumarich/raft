@@ -51,6 +51,15 @@ class RaftMachine:
 
         assert num_servers % 2 != 0, "Only supporting an odd number of servers for now"
 
+    def mock_reset(self):
+        voted_for = self.voted_for
+        current_term = self.current_term
+        log = self.log
+        self.__init__(self.server_id, self.num_servers)
+        self.voted_for = voted_for
+        self.current_term = current_term
+        self.log = log
+
     def __repr__(self) -> str:
         return f"Server={self.server_id} Clock={self.clock} Term={self.current_term} {self.state} "
 
@@ -96,9 +105,14 @@ class RaftMachine:
             if server_id == self.server_id:
                 continue
 
+            next_index = self.next_index[server_id]
+
             # If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-            logs_to_send = self.log.get_logs_from(self.next_index[server_id])
+            logs_to_send = self.log.get_logs_from(next_index)
             id = None if len(logs_to_send) == 0 else str(uuid.uuid4())
+
+            prev_log_index = 0 if next_index == 1 else next_index - 1
+            prev_log_term = 0 if next_index == 1 else self.log.get(next_index - 1).term
 
             append_entries_to_send[server_id] = AppendEntries(
                 uuid=id,
@@ -119,7 +133,7 @@ class RaftMachine:
         voted_for_other_candidate = not (
             request_vote.candidate_id == self.voted_for or self.voted_for is None
         )
-        if voted_for_other_candidate:
+        if voted_for_other_candidate and request_vote.term == self.current_term:
             return False
 
         candidate_log_out_of_date = (
@@ -253,16 +267,17 @@ class RaftMachine:
                 not append_entries_response.success
             ), "A succeeded AE should never have a greater term"
             self.update_term(append_entries_response.term)
-
-        if not self.is_leader:
             return
 
-        if append_entries_response.uuid is None:
+        if not self.is_leader:
             return
 
         # • If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
         if not append_entries_response.success:
             self.next_index[append_entries_response.server_id] -= 1
+            return
+
+        if append_entries_response.uuid is None:
             return
 
         # • If successful: update nextIndex and matchIndex for follower (§5.3)

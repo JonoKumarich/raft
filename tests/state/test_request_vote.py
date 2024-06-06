@@ -15,6 +15,7 @@ def test_request_vote_is_invalid_lower_term():
 
 def test_request_vote_is_invalid_already_voted():
     machine = RaftMachine(0, 3)
+    machine.update_term(1)
     machine.voted_for = 2
     req = RequestVote(term=1, candidate_id=1, last_log_term=0, last_log_index=0)
     assert not machine._request_vote_valid(req)
@@ -58,6 +59,16 @@ def test_handle_request_vote_rejected(mocker):
     assert machine.current_term == 1
 
 
+def test_request_vote_updates_term():
+    machine = RaftMachine(0, 3)
+    machine.update_term(1)
+    r = RequestVote(term=2, candidate_id=1, last_log_term=0, last_log_index=0)
+
+    res = machine.handle_request_vote(r)
+    assert res.vote_granted
+    assert machine.current_term == r.term
+
+
 def test_handle_request_vote_successful_updates_state():
     machine = RaftMachine(0, 3)
     machine.increment_clock()
@@ -79,3 +90,12 @@ def test_handle_request_vote_successful_updates_state():
     assert res == RequestVoteResponse(
         server_id=machine.server_id, term=machine.current_term, vote_granted=True
     )
+
+
+def test_vote_accepted_higher_term_more_logs():
+    machine = RaftMachine(0, 3)
+    machine.update_term(1)
+    machine.log.append_entry(0, 0, [LogEntry(1, Command(Instruction.SET, "foo", 1))])
+
+    rv = RequestVote(term=2, candidate_id=1, last_log_index=2, last_log_term=2)
+    assert machine.handle_request_vote(rv).vote_granted
