@@ -207,6 +207,12 @@ def test_log_replication_figure_8_path_b():
     assert s5.is_candidate
 
 
+def test_multi_entry_append_updates_match_index():
+    m = RaftMachine(0, 5)
+
+    assert False
+
+
 def send_and_receive(
     leader: RaftMachine,
     servers: list[RaftMachine],

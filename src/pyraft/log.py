@@ -1,7 +1,6 @@
 import uuid
 from dataclasses import dataclass, field
-from decimal import Inexact
-from enum import Enum, auto
+from enum import Enum
 from typing import Any, Optional, Self
 
 
@@ -119,12 +118,6 @@ class RaftLog:
         # Rule 3: If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
         entries_to_extend = []
         for i, entry in enumerate(entries, start=1):
-            # if entry.term < self.last_term:
-            #     # FIXME:
-            #     raise AppendEntriesFailedError(
-            #         "Can't insert a lower term than the last entry"
-            #     )
-
             new_item_index = prev_log_index + i
 
             try:

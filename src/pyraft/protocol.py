@@ -21,7 +21,6 @@ class FixedLengthHeaderProtocol(MessageProtocol):
         socket.sendall(header + message)
 
     def receive_message(self, socket: socket.socket) -> bytes:
-
         header = self._receive_until(self.header_byte_size, socket)
         message_size = int.from_bytes(header, "big")
         message = self._receive_until(message_size, socket)

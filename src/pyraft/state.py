@@ -5,12 +5,8 @@ from enum import Enum, auto
 from typing import Optional
 
 from pyraft.log import AppendEntriesFailedError, LogEntry, RaftLog
-from pyraft.message import (
-    AppendEntries,
-    AppendEntriesResponse,
-    RequestVote,
-    RequestVoteResponse,
-)
+from pyraft.message import (AppendEntries, AppendEntriesResponse, RequestVote,
+                            RequestVoteResponse)
 from pyraft.storage import DataStore, LocalDataStore
 
 
@@ -69,7 +65,6 @@ class RaftMachine:
         self.datastore.store_log(self.log)
 
     def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntries]]:
-
         self.increment_clock()
         prev_log_index = self.log.last_index
         prev_log_term = self.log.last_term
@@ -167,7 +162,6 @@ class RaftMachine:
     def handle_request_vote_response(
         self, request_vote_response: RequestVoteResponse
     ) -> Optional[AppendEntries]:
-
         # Skip remaining votes responses after obtaining a majority
         if self.is_leader:
             return
