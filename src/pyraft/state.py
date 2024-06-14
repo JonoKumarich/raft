@@ -7,7 +7,7 @@ from typing import Optional
 from pyraft.log import AppendEntriesFailedError, LogEntry, RaftLog
 from pyraft.message import (AppendEntries, AppendEntriesResponse, RequestVote,
                             RequestVoteResponse)
-from pyraft.storage import DataStore, LocalDataStore
+from pyraft.storage import DataStore, JSONDataStore
 
 
 class MachineState(Enum):
@@ -21,9 +21,7 @@ def create_timeout() -> int:
 
 
 class RaftMachine:
-    def __init__(
-        self, server_id: int, num_servers: int, datastore: DataStore = LocalDataStore()
-    ) -> None:
+    def __init__(self, server_id: int, num_servers: int) -> None:
         self.server_id = server_id
         self.num_servers = num_servers
         self.current_term = 0
@@ -32,10 +30,10 @@ class RaftMachine:
         self.election_timeout = create_timeout()
         self.state = MachineState.FOLLOWER
         self.commit_index = 0
-        self.last_applied = 0  # TODO: If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
+        self.last_applied = 0
         self.votes = {id: False for id in range(num_servers)}
         self.log = RaftLog()
-        self.datastore = datastore
+        self.datastore: DataStore = JSONDataStore(f"state/server_{server_id}.json")
         self.heartbeat_freq = 5
         self.pending_entries: queue.Queue[bytes] = queue.Queue()
 
@@ -59,12 +57,16 @@ class RaftMachine:
     def __repr__(self) -> str:
         return f"Server={self.server_id} Clock={self.clock} Term={self.current_term} {self.state} "
 
-    def update_persistent_storage(self) -> None:
-        self.datastore.store_term(self.current_term)
-        self.datastore.store_vote(self.voted_for)
-        self.datastore.store_log(self.log)
+    def commit_eligile_log_entries(self) -> None:
+        # If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
+        while self.commit_index > self.last_applied:
+            self.last_applied += 1
+            entry = self.log.get(self.last_applied)
+            # TODO: Apply command could return a get value, in which we need to send it back to the server
+            self.datastore.apply_command(entry.command)
 
     def handle_tick(self) -> Optional[RequestVote | dict[int, AppendEntries]]:
+        self.commit_eligile_log_entries()
         self.increment_clock()
         prev_log_index = self.log.last_index
         prev_log_term = self.log.last_term
@@ -94,6 +96,9 @@ class RaftMachine:
                 self.log.last_term,
                 [LogEntry.from_bytes(entry, self.current_term)],
             )
+
+        self.datastore.store_log(self.log)
+        self.datastore.store_term(self.current_term)
 
         append_entries_to_send = {}
         for server_id in range(self.num_servers):
@@ -152,7 +157,8 @@ class RaftMachine:
         self.voted_for = request_vote.candidate_id
         self.reset_clock()
 
-        self.update_persistent_storage()
+        self.datastore.store_vote(self.voted_for)
+        self.datastore.store_term(self.current_term)
         return RequestVoteResponse(
             server_id=self.server_id,
             term=self.current_term,
@@ -235,15 +241,13 @@ class RaftMachine:
                 success=False,
             )
 
-        if len(append_entries.entries) > 0:
-            print(
-                f"Server {self.server_id} commit_index={self.commit_index} log={self.log._items}"
-            )
-
         self.update_follower_commit_index(
             append_entries.leader_commit, self.log.last_index
         )
 
+        self.datastore.store_vote(self.voted_for)
+        self.datastore.store_term(self.current_term)
+        self.datastore.store_log(self.log)
         return AppendEntriesResponse(
             server_id=self.server_id,
             uuid=append_entries.uuid,
@@ -401,5 +405,4 @@ class RaftMachine:
             if self.log.get(next).term != self.current_term:
                 break
 
-            print(f"Commit index increased from {self.commit_index}->{next}")
             self.commit_index = next

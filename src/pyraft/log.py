@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Self
+from typing import Optional
 
 
 class MessageArgSizeError(Exception):
@@ -15,6 +15,7 @@ class Instruction(Enum):
     GET = "get"
     SET = "set"
     ADD = "add"
+    DEL = "del"
 
     @classmethod
     def from_text(cls, text: str) -> "Instruction":
@@ -22,6 +23,7 @@ class Instruction(Enum):
             "get": cls.GET,
             "set": cls.SET,
             "add": cls.ADD,
+            "del": cls.DEL,
         }[text.lower()]
 
 
@@ -29,7 +31,7 @@ class Instruction(Enum):
 class Command:
     instruction: Instruction
     key: str
-    value: Optional[int]
+    value: Optional[int] = None
 
 
 @dataclass
@@ -44,19 +46,24 @@ class LogEntry:
         instruction = Instruction.from_text(instruction.decode())
 
         match instruction:
-            case Instruction.SET:
+            case Instruction.SET | Instruction.ADD:
                 try:
                     key, value = value.split(maxsplit=1)
                     command = Command(instruction, key.decode(), int(value))
                 except ValueError:
                     raise MessageArgSizeError(input, 3)
+            case Instruction.GET | Instruction.DEL:
+                command = Command(instruction, value.decode())
             case _:
-                raise NotImplementedError
+                raise ValueError(f"Command {instruction} not valid")
 
         return cls(term, command)
 
-    def __repr__(self) -> str:
-        return f"Term {self.term}: {self.command.instruction.value} {self.command.key} {self.command.value}"
+    def toJSON(self) -> dict:
+        entry = self.__dict__.copy()
+        entry["command"] = self.command.__dict__.copy()
+        entry["command"]["instruction"] = self.command.instruction.value
+        return entry
 
 
 class AppendEntriesFailedError(Exception):

@@ -1,10 +1,11 @@
+import random
+import string
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from pyraft.controller import Controller
 from pyraft.server import SocketServer
 from pyraft.state import RaftMachine
-from pyraft.storage import LocalDataStore
 
 SERVER_NODES = {
     0: ("127.0.0.1", 20000),
@@ -25,6 +26,7 @@ class Network:
             for id, (host, port) in server_nodes.items()
         }
         self.controllers: dict[int, Controller] = {}
+        self.sent_keys = set()
 
     def start_servers(self) -> None:
         threading.Thread(target=self.key_listener, daemon=True).start()
@@ -36,7 +38,8 @@ class Network:
         threading.Thread(target=server.run, daemon=True).start()
 
         controller = Controller(
-            server, RaftMachine(server.server_id, self.network_size)
+            server,
+            RaftMachine(server.server_id, self.network_size),
         )
         self.controllers[server.server_id] = controller
         controller.run()
@@ -59,11 +62,31 @@ class Network:
                     self.controllers[server_num].timeout()
                     print(f"Timed out server {server_num}")
                 case "m":
-                    message = b"message set foo 1"
+                    message = self._random_command()
                     self.controllers[server_num].server.inbox.put(message)
                     print(f"Sent message to {message.decode()} server {server_num}")
                 case _:
                     print(f"Command not recognised: {command}")
+
+    def _random_command(self) -> bytes:
+        command = random.choice(["get", "set", "del", "add"])
+
+        if command == "set":
+            key = "".join(random.choice(string.ascii_lowercase) for _ in range(8))
+            self.sent_keys.add(key)
+        else:
+            if len(self.sent_keys) == 0:
+                return self._random_command()
+            key = random.choice(list(self.sent_keys))
+
+        if command == "del":
+            self.sent_keys.remove(key)
+
+        value = (
+            f" {random.randint(100000, 999999)}" if command in ("set", "add") else ""
+        )
+
+        return f"message {command} {key}{value}".encode()
 
 
 if __name__ == "__main__":
